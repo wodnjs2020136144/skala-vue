@@ -214,3 +214,12 @@ Default/Named/Scoped Slot 3종 연습.
   </template>
 </BaseDashboardCard>
 ```
+
+---
+
+## 부가 실습 (공식 커리큘럼 외) — Font Awesome 아이콘 적용
+
+공식 8장(UI 라이브러리) 커리큘럼과 별개로, 사용자 요청에 따라 미리 도입. 자세한 설치/사용법은 [vue-study-guide.md의 "부가 학습: UI 라이브러리 — Font Awesome"](./vue-study-guide.md#부가-학습-ui-라이브러리--font-awesome) 참고.
+
+- `FontAwesomeDemo.vue`: 기본 사용법(아이콘 종류/크기/색상) 데모
+- `WeatherMockup.vue`의 온도 라벨 이모지(🔥/❄)를 `<FontAwesomeIcon icon="fire"/snowflake" />`로 교체

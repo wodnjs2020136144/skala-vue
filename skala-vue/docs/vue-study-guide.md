@@ -433,3 +433,49 @@ Props(데이터 주입)와 달리 Slot은 **HTML 마크업/레이아웃 조각**
 ```
 
 > 중요 개념: Slot으로 주입된 콘텐츠는 시각적으로는 자식 컴포넌트 내부에 위치하지만, **스크립트 스코프(변수/함수)는 부모(주입한 쪽) 컴포넌트에 소속**된다.
+
+---
+
+## 부가 학습: UI 라이브러리 — Font Awesome
+
+> 8장(UI 라이브러리) 공식 커리큘럼과는 별개로, 개인적으로 아이콘 라이브러리를 쓰고 싶어서 미리 도입한 내용입니다. 공식 8장 자료가 제공되면 그 내용과 통합 검토합니다.
+
+### 설치
+```bash
+npm install --save @fortawesome/fontawesome-svg-core @fortawesome/free-solid-svg-icons @fortawesome/vue-fontawesome
+```
+- `fontawesome-svg-core`: 핵심 엔진
+- `free-solid-svg-icons`: 무료 Solid 스타일 아이콘 모음 (필요한 아이콘만 골라 씀 → 번들 크기 최적화)
+- `vue-fontawesome`: Vue 3용 `<FontAwesomeIcon>` 컴포넌트
+
+### main.js에서 전역 등록
+```js
+import { library } from '@fortawesome/fontawesome-svg-core'
+import { FontAwesomeIcon } from '@fortawesome/vue-fontawesome'
+import { faFire, faSnowflake, faCloud, faSun, faCloudRain, faMagnifyingGlass } from '@fortawesome/free-solid-svg-icons'
+
+library.add(faFire, faSnowflake, faCloud, faSun, faCloudRain, faMagnifyingGlass)
+
+const app = createApp(App)
+app.component('FontAwesomeIcon', FontAwesomeIcon)
+```
+`library.add()`에 등록한 아이콘만 번들에 포함되므로, 사용할 아이콘을 필요한 만큼만 골라서 등록하는 것이 핵심이다. 전역 등록해두면 이후 모든 컴포넌트에서 별도 import 없이 `<FontAwesomeIcon icon="아이콘명" />`으로 바로 사용 가능하다.
+
+### 사용 예시
+```html
+<!-- 기본 사용 -->
+<FontAwesomeIcon icon="fire" />
+
+<!-- 크기 조절: xs, sm, lg, 1x~10x -->
+<FontAwesomeIcon icon="sun" size="2x" />
+
+<!-- 색상은 일반 style/class로 제어 -->
+<FontAwesomeIcon icon="fire" style="color: red" />
+```
+
+### 실전 적용
+날씨 Mockup(`WeatherMockup.vue`)의 온도 라벨 이모지(🔥/❄)를 실제 아이콘으로 교체:
+```html
+<span v-if="city.temp >= 25"><FontAwesomeIcon icon="fire" /> 더움 (25도 이상)</span>
+<span v-else><FontAwesomeIcon icon="snowflake" /> 선선함 (25도 미만)</span>
+```

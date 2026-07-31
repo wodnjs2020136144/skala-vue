@@ -32,8 +32,8 @@ const filteredList = computed(() =>
     <ul>
       <li v-for="city in filteredList" :key="city.id">
         {{ city.name }} - {{ city.temp }}도, {{ city.status }}
-        <span v-if="city.temp >= 25">🔥 더움 (25도 이상)</span>
-        <span v-else>❄ 선선함 (25도 미만)</span>
+        <span v-if="city.temp >= 25"><FontAwesomeIcon icon="fire" /> 더움 (25도 이상)</span>
+        <span v-else><FontAwesomeIcon icon="snowflake" /> 선선함 (25도 미만)</span>
       </li>
     </ul>
   </div>

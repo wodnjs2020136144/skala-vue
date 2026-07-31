@@ -977,3 +977,117 @@
 
 **느낀점**
 - 사용자가 전달한 정보라도 잠정적인 것일 수 있다는 걸 배웠다 — "Slack 제출이다"라는 말을 곧이곧대로 문서에 박아 넣었는데, 나중에 공식 체크리스트로 뒤집혔다. 앞으로는 이런 종류의 확정 정보(제출 방식처럼 되돌리기 번거로운 것)는 "현재까지 확인된 바로는"이라는 식으로 유보적으로 기록해두는 게 더 안전했을 것 같다. 다행히 형상관리용으로 미리 만들어둔 저장소가 있어서 Private→Public 전환만으로 빠르게 대응할 수 있었다.
+
+---
+
+## 14. Font Awesome 아이콘 라이브러리 도입 (부가 실습, 공식 커리큘럼 외)
+
+**요구사항**
+- 사용자가 Font Awesome(폰트어썸) 아이콘을 프로젝트에서 사용하고 싶다고 요청. 설치·적용하고 사용법을 문서화한다.
+
+**사고 과정**
+- 공식 커리큘럼 8장(UI 라이브러리)에서 다룰 법한 내용이지만 아직 해당 자료를 받지 못했으므로, 이번 도입은 "부가 실습"으로 명확히 구분해 문서화하고 8장 공식 자료가 오면 통합 검토하기로 함.
+- 적용 범위를 사용자에게 확인한 결과, 날씨 Mockup의 온도 라벨 이모지(🔥/❄)를 실제 아이콘으로 교체 + 별도 사용법 데모 컴포넌트 둘 다 만들기로 함.
+- 번들 크기를 위해 필요한 아이콘만 `library.add()`로 등록하는 방식(Tree-shaking 친화적 패턴)을 적용.
+
+**해결 과정**
+1. 패키지 설치:
+   ```bash
+   npm install --save --legacy-peer-deps @fortawesome/fontawesome-svg-core @fortawesome/free-solid-svg-icons @fortawesome/vue-fontawesome
+   ```
+2. `main.js`에 아이콘 라이브러리 등록 및 `FontAwesomeIcon` 전역 컴포넌트 등록.
+
+   #### `src/main.js`
+   ```js
+   import { createApp } from 'vue'
+   import { createPinia } from 'pinia'
+
+   import { library } from '@fortawesome/fontawesome-svg-core'
+   import { FontAwesomeIcon } from '@fortawesome/vue-fontawesome'
+   import {
+     faFire,
+     faSnowflake,
+     faCloud,
+     faSun,
+     faCloudRain,
+     faMagnifyingGlass,
+   } from '@fortawesome/free-solid-svg-icons'
+
+   import App from './App.vue'
+   import router from './router'
+
+   library.add(faFire, faSnowflake, faCloud, faSun, faCloudRain, faMagnifyingGlass)
+
+   const app = createApp(App)
+
+   app.use(createPinia())
+   app.use(router)
+   app.component('FontAwesomeIcon', FontAwesomeIcon)
+
+   app.mount('#app')
+   ```
+
+3. `WeatherMockup.vue`의 온도 라벨 이모지를 아이콘으로 교체.
+
+   #### `src/components/practices/weather/WeatherMockup.vue` (변경 부분)
+   ```html
+   <ul>
+     <li v-for="city in filteredList" :key="city.id">
+       {{ city.name }} - {{ city.temp }}도, {{ city.status }}
+       <span v-if="city.temp >= 25"><FontAwesomeIcon icon="fire" /> 더움 (25도 이상)</span>
+       <span v-else><FontAwesomeIcon icon="snowflake" /> 선선함 (25도 미만)</span>
+     </li>
+   </ul>
+   ```
+
+4. 기본 사용법을 보여주는 별도 데모 컴포넌트 생성.
+
+   #### `src/components/practices/library/FontAwesomeDemo.vue`
+   ```vue
+   <script setup>
+   // FontAwesome 아이콘은 main.js에서 전역 등록(library.add + app.component)해두면
+   // 이 컴포넌트처럼 별도 import 없이 <FontAwesomeIcon icon="아이콘명" />으로 바로 쓸 수 있다.
+   </script>
+
+   <template>
+     <div class="practice-section">
+       <h2>Font Awesome 아이콘 학습</h2>
+
+       <h3>1) 기본 사용법</h3>
+       <p><FontAwesomeIcon icon="sun" /> 맑음</p>
+       <p><FontAwesomeIcon icon="cloud" /> 흐림</p>
+       <p><FontAwesomeIcon icon="cloud-rain" /> 비</p>
+       <p><FontAwesomeIcon icon="fire" /> 더움</p>
+       <p><FontAwesomeIcon icon="snowflake" /> 선선함/추움</p>
+
+       <h3>2) 크기 · 색상 조절</h3>
+       <p><FontAwesomeIcon icon="sun" size="2x" style="color: orange" /> size="2x" + 색상 지정</p>
+       <p><FontAwesomeIcon icon="fire" size="lg" style="color: red" /> size="lg"</p>
+
+       <h3>3) 텍스트와 나란히 (검색 아이콘 예시)</h3>
+       <label>
+         <FontAwesomeIcon icon="magnifying-glass" />
+         <input placeholder="검색어를 입력하세요" style="margin-left: 6px" />
+       </label>
+     </div>
+   </template>
+   ```
+
+5. `App.vue`에 `FontAwesomeDemo` import 및 배치 추가.
+6. `docs/vue-study-guide.md`에 "부가 학습: UI 라이브러리 — Font Awesome" 섹션, `docs/vue-practice-exercises.md`에 "부가 실습" 섹션 추가.
+7. 브라우저에서 날씨 목록의 🔥/❄ 아이콘과 데모 섹션(아이콘 종류/크기/색상/검색창 조합)이 정상 렌더링되는지 확인.
+
+**트러블슈팅**
+- **문제**: `npm install` 시 이전과 동일한 `ERESOLVE` 의존성 충돌(`oxlint` vs `eslint-plugin-oxlint` peer dependency) 재발생.
+- **원인**: 프로젝트의 기존 oxlint 버전 불일치 문제(1일차 항목 1에서 이미 확인한 것과 동일 원인)로, 새 패키지 설치 때마다 매번 나타남.
+- **해결**: `--legacy-peer-deps` 플래그로 재시도해 정상 설치. (근본 해결책은 아니지만, 이 프로젝트에서는 매번 이 플래그를 붙이면 된다는 패턴을 확인함)
+
+**결과**
+- 날씨 Mockup의 온도 라벨이 이모지 대신 FontAwesome 아이콘(🔥→fire, ❄→snowflake)으로 정상 교체됨.
+- 데모 컴포넌트에서 아이콘 5종, 크기(`2x`/`lg`) 및 색상 커스터마이징, 검색창과의 조합까지 모두 정상 렌더링 확인.
+
+![Font Awesome 아이콘 적용 결과](./images/day1/14-fontawesome-demo.jpg)
+
+**느낀점**
+- `--legacy-peer-deps` 충돌이 새 패키지를 설치할 때마다 반복된다는 걸 보니, 이 프로젝트의 oxlint 버전 고정 문제를 아예 `package.json`에서 근본적으로 정리하는 게 나중에 더 편할 것 같다는 생각이 들었다(지금 당장은 매번 플래그로 우회하는 것으로 충분).
+- 공식 커리큘럼에 없는 내용을 추가할 때 "부가 실습"으로 명확히 구분해서 기록해두니, 나중에 공식 8장 자료를 받았을 때 무엇이 이미 되어 있고 무엇을 새로 봐야 하는지 헷갈리지 않을 것 같다.

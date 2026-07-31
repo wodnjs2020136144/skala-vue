@@ -11,6 +11,7 @@ import VOnEventDemo from './components/practices/directives/VOnEventDemo.vue'
 import VModelFormStyleDemo from './components/practices/directives/VModelFormStyleDemo.vue'
 import WeatherMockup from './components/practices/weather/WeatherMockup.vue'
 import TodoListDemo from './components/practices/basic/TodoListDemo.vue'
+import FontAwesomeDemo from './components/practices/library/FontAwesomeDemo.vue'
 </script>
 
 <template>
@@ -37,6 +38,8 @@ import TodoListDemo from './components/practices/basic/TodoListDemo.vue'
     <WeatherMockup />
     <hr />
     <TodoListDemo />
+    <hr />
+    <FontAwesomeDemo />
   </div>
 </template>
 
