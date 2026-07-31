@@ -1091,3 +1091,139 @@
 **느낀점**
 - `--legacy-peer-deps` 충돌이 새 패키지를 설치할 때마다 반복된다는 걸 보니, 이 프로젝트의 oxlint 버전 고정 문제를 아예 `package.json`에서 근본적으로 정리하는 게 나중에 더 편할 것 같다는 생각이 들었다(지금 당장은 매번 플래그로 우회하는 것으로 충분).
 - 공식 커리큘럼에 없는 내용을 추가할 때 "부가 실습"으로 명확히 구분해서 기록해두니, 나중에 공식 8장 자료를 받았을 때 무엇이 이미 되어 있고 무엇을 새로 봐야 하는지 헷갈리지 않을 것 같다.
+
+---
+
+## 15. 날씨 Mockup 카드 디자인 개편 (참고 이미지 기반, 톤다운 + 여백 강조)
+
+**요구사항**
+- 사용자가 제공한 참고 이미지(대시보드형 날씨 앱 UI)와 유사하게 `WeatherMockup.vue`의 디자인을 변경. 전체적으로 톤다운된 색상, 과하지 않고 여백이 적당한 레이아웃을 원함.
+
+**사고 과정**
+- 참고 이미지는 사이드바·검색창·대기질/UV 카드 등을 포함한 풀 대시보드였지만, 현재 데이터(도시 3개, 온도/상태만 존재)로는 그 모든 위젯을 채울 수 없음. 사용자에게 "카드 디자인만 개선" vs "전체 대시보드 셸 확장" 중 범위를 확인한 결과 전자로 결정.
+- 참고 이미지의 채도 높은 오렌지/라임/틸 색상 대신, 톤다운된 팔레트(테라코타 계열 `#C97B4A`/`#F5E4DB`, 블루그레이 계열 `#6E97A6`/`#E1EAEE`, 뉴트럴 그레이 텍스트)로 재구성.
+- 카드 요소: 아이콘 배지(둥근 사각형, 파스텔 배경) + 도시명/날씨상태 + 온도(큰 숫자) + 상태 라벨(pill) 구조로, 참고 이미지의 "Weather" 카드 구성을 단순화해서 차용.
+- 검색창은 참고 이미지처럼 알약(pill) 모양 + 왼쪽 아이콘 형태로 변경하되, 배경은 흰색으로 은은하게.
+- `frontend-design` 스킬 가이드에 따라 색상 토큰(6개 내외 hex)과 레이아웃을 먼저 정하고 코드를 작성.
+
+**해결 과정**
+1. `WeatherMockup.vue`의 템플릿을 카드 리스트 구조로 재작성하고, scoped 스타일로 토큰다운 팔레트와 카드 레이아웃(둥근 모서리, 은은한 그림자, 넉넉한 padding/gap)을 적용. `:value`+`@input` 검색 로직과 `:key`=id, `v-if` 온도 분기 로직 등 day1.pdf 스펙 요구사항은 그대로 유지하고 마크업/스타일만 교체.
+
+   #### `src/components/practices/weather/WeatherMockup.vue` (전체, 스크립트 로직은 기존과 동일)
+   ```vue
+   <script setup>
+   import { ref, computed } from 'vue'
+
+   const weatherList = ref([
+     { id: 'city_01', name: '서울', temp: 28, status: '맑음' },
+     { id: 'city_02', name: '수원', temp: 24, status: '비' },
+     { id: 'city_03', name: '부산', temp: 26, status: '구름' },
+   ])
+
+   const searchQuery = ref('')
+   function handleSearchInput(e) {
+     searchQuery.value = e.target.value
+   }
+
+   const filteredList = computed(() =>
+     weatherList.value.filter((city) => city.name.includes(searchQuery.value)),
+   )
+   </script>
+
+   <template>
+     <div class="weather-card-app">
+       <header class="weather-card-app__header">
+         <h2>날씨 Mockup — Day 1 공식 과제 (day1.pdf 스펙)</h2>
+         <div class="search-bar">
+           <FontAwesomeIcon icon="magnifying-glass" class="search-bar__icon" />
+           <input
+             class="search-bar__input"
+             :value="searchQuery"
+             @input="handleSearchInput"
+             placeholder="도시명을 검색하세요 (한글 입력 테스트)"
+           />
+         </div>
+       </header>
+
+       <ul class="city-list">
+         <li v-for="city in filteredList" :key="city.id" class="city-card">
+           <div class="city-card__badge" :class="city.temp >= 25 ? 'is-warm' : 'is-cool'">
+             <FontAwesomeIcon :icon="city.temp >= 25 ? 'fire' : 'snowflake'" />
+           </div>
+           <div class="city-card__info">
+             <p class="city-card__name">{{ city.name }}</p>
+             <p class="city-card__status">{{ city.status }}</p>
+           </div>
+           <div class="city-card__temp-block">
+             <p class="city-card__temp">{{ city.temp }}<span class="city-card__unit">°</span></p>
+             <span class="city-card__label" :class="city.temp >= 25 ? 'is-warm' : 'is-cool'">
+               {{ city.temp >= 25 ? '더움' : '선선함' }}
+             </span>
+           </div>
+         </li>
+       </ul>
+
+       <p v-if="filteredList.length === 0" class="empty-state">검색 결과가 없습니다.</p>
+     </div>
+   </template>
+
+   <style scoped>
+   .weather-card-app {
+     max-width: 420px;
+     margin: 0 auto;
+     padding: 28px;
+     background: #f6f7f8;
+     border-radius: 20px;
+     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Pretendard', sans-serif;
+   }
+   .weather-card-app__header h2 {
+     font-size: 15px;
+     font-weight: 600;
+     color: #8a8f98;
+     margin: 0 0 16px;
+     letter-spacing: 0.2px;
+   }
+   .search-bar {
+     display: flex;
+     align-items: center;
+     gap: 10px;
+     background: #ffffff;
+     border-radius: 999px;
+     padding: 10px 16px;
+     box-shadow: 0 1px 2px rgba(20, 20, 30, 0.04);
+   }
+   .search-bar__icon { color: #b7bcc4; font-size: 14px; }
+   .search-bar__input { border: none; outline: none; flex: 1; font-size: 14px; color: #3a3f45; background: transparent; }
+   .search-bar__input::placeholder { color: #b7bcc4; }
+   .city-list { list-style: none; margin: 20px 0 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+   .city-card { display: flex; align-items: center; gap: 14px; background: #ffffff; border-radius: 16px; padding: 16px 18px; box-shadow: 0 1px 3px rgba(20, 20, 30, 0.05); }
+   .city-card__badge { width: 40px; height: 40px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
+   .city-card__badge.is-warm { background: #f5e4db; color: #c97b4a; }
+   .city-card__badge.is-cool { background: #e1eaee; color: #6e97a6; }
+   .city-card__info { flex: 1; min-width: 0; }
+   .city-card__name { margin: 0; font-size: 15px; font-weight: 600; color: #2e3238; }
+   .city-card__status { margin: 2px 0 0; font-size: 13px; color: #9ba1a8; }
+   .city-card__temp-block { text-align: right; }
+   .city-card__temp { margin: 0; font-size: 20px; font-weight: 700; color: #2e3238; line-height: 1; }
+   .city-card__unit { font-size: 13px; font-weight: 500; color: #9ba1a8; }
+   .city-card__label { display: inline-block; margin-top: 4px; font-size: 11px; padding: 2px 8px; border-radius: 999px; }
+   .city-card__label.is-warm { background: #f5e4db; color: #c97b4a; }
+   .city-card__label.is-cool { background: #e1eaee; color: #6e97a6; }
+   .empty-state { text-align: center; color: #9ba1a8; font-size: 13px; margin-top: 24px; }
+   </style>
+   ```
+
+2. 브라우저에서 렌더링 확인 후, 검색창에 "부산"을 직접 타이핑해 카드 디자인 위에서도 한글 검색/필터링이 정상 동작하는지 재검증.
+
+**트러블슈팅**
+- 없음.
+
+**결과**
+- 오렌지/블루그레이 톤다운 팔레트의 카드 리스트로 정상 렌더링, 검색창·아이콘 배지·온도·상태 라벨 모두 의도대로 표시됨.
+- 한글 검색("부산") 입력 시 카드 필터링이 새 디자인에서도 정상 동작함을 재확인.
+
+![날씨 Mockup 카드 디자인 개편 결과](./images/day1/15-weather-card-redesign.jpg)
+![카드 디자인에서 한글 검색 재검증](./images/day1/16-weather-card-redesign-search.jpg)
+
+**느낀점**
+- 참고 이미지를 그대로 복제하기보다, 실제 보유한 데이터에 맞게 범위를 좁혀서(카드 디자인만) 적용한 것이 과유불급을 피하는 데 도움이 됐다. 톤다운 팔레트는 채도를 낮추고 배경색을 파스텔 톤의 배지 색상으로만 국한하니, 기능은 그대로인데도 훨씬 차분하고 정돈된 인상을 준다는 걸 체감했다.
