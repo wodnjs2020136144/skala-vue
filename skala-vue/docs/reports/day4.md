@@ -1,8 +1,13 @@
 # Vue.js 실습 기록 - Day 4
 
 - 과정명: Full-Stack Engineering - Frontend-framework: Vue.js (강병호)
-- 날짜: (진행일 기록)
-- 오늘 목표: (진행 전 또는 진행 중 채움)
+- 날짜: 2026-08-05
+- 오늘 목표 (`docs/checklist.md` 4일차 기준): 마무리 + 제출
+  - Element Plus로 UI 정리
+  - Modern JS — 구조분해·전개·옵셔널 체이닝 적용
+  - `npm run build` · base 경로 확인 · 정적 배포(Vercel·Netlify·GitHub Pages)
+  - 저장소가 Public인지 시크릿 창으로 최종 확인
+  - 수업 종료 전까지 제출
 
 > 이 문서는 실습 중 진행한 작업을 요구사항 → 사고 과정 → 해결 과정 → 트러블슈팅 → 결과 → 느낀점 순서로 기록합니다. 최종 종합 보고서는 [final-report.md](./final-report.md)를 참고하세요.
 >

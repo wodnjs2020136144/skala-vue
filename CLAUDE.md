@@ -107,20 +107,29 @@ LLM의 일반적인 코딩 실수를 줄이기 위한 행동 지침입니다. �
 
 이 프로젝트는 Vue.js 강의(`skala-vue/pdf/`에 원본 PDF 보관)를 따라가며 실습하는 용도입니다. PDF 내용을 정리한 문서:
 
+- `skala-vue/docs/checklist.md` — **종합과제 체크리스트 (최우선 기준 자료)**. 제출 방식, 일자별 정확한 범위와 일정.
 - `skala-vue/docs/vue-study-guide.md` — 챕터별 이론 정리 (Vue 개요, Directive, Composition API, Component 등)
 - `skala-vue/docs/vue-practice-exercises.md` — `[실습]`/`Code Challenge`만 분리한 실습 목록. 실습 코드를 작성할 때는 이 문서를 먼저 참고할 것.
 
 현재 확보된 PDF는 전체 10개 챕터 커리큘럼 중 **1~4장(Vue.js 시작하기 / Vue 문법 / Composition API / Vue Component)까지만** 다룹니다. 5장(Vue Router) 이후 자료가 추가되면 위 두 문서도 이어서 갱신해야 합니다.
 
-이 강의의 핵심 실습은 하나의 **"날씨(Weather)" 대시보드 앱**이며, 장이 진행될수록 점진적으로 발전합니다: 정적 Mockup(2장) → Composition API 적용(3장) → 컴포넌트 분리(4장). 실습 관련 작업을 할 때는 이전 단계 코드를 확장하는 흐름이라는 점을 염두에 둘 것.
+이 강의의 핵심 실습은 하나의 **"날씨(Weather)" 대시보드 앱**이며, `checklist.md` 기준 실제 일정으로 점진적으로 발전합니다: 1일차(7/31) 정적 Mockup → 2일차(8/3) Composition API 적용 + 컴포넌트 4개 분리 → 3일차(8/4) Router·Pinia·Axios(실제 API 연동, ℃/℉ 토글) → 4일차(8/5) Element Plus·Modern JS 정리 및 빌드/배포. 실습 관련 작업을 할 때는 이전 단계 코드를 확장하는 흐름이라는 점을 염두에 둘 것 (새로 만드는 게 아니라 계속 이어서 발전시킴).
 
-### 일자별 공식 실습 강의안 (`day{N}.pdf`) — 우선순위 최상위
+### 자료 우선순위: 체크리스트 > day{N}.pdf > 158p 이론 교재
 
-강사가 매일 `skala-vue/pdf/day{N}.pdf` 형식으로 그날의 공식 실습 강의안을 추가로 제공한다. **158p 이론 교재(`vue-study-guide.md`/`vue-practice-exercises.md`의 원본)는 배경 이론과 원본 문제를 제공하는 자료이고, `day{N}.pdf`가 그날 실제로 진행·제출해야 할 정확한 범위·데이터·구현 방식을 규정하는 최우선 기준이다.** 두 자료의 내용이 다르면 `day{N}.pdf`를 따른다.
+세 종류의 자료가 있으며, 서로 내용이 다르면 **위에 있는 자료가 우선한다**:
 
-- **실제 제출 방식**: 이 분반은 git/GitHub 제출이 아니라 **결과물을 PDF로 정리해 Slack에 제출**하는 방식이다. `day{N}.pdf`에 나오는 GitHub Fork/Clone/push 안내는 이 분반에는 적용되지 않는 일반 템플릿 문구다.
-- 다만 **형상관리(버전 관리) 목적**으로 `study_to_vuejs`를 로컬 git 저장소로 관리하고 GitHub Private 저장소(`skala-vue`, 계정 `wodnjs2020136144`)에 백업한다. 로컬 `git init`은 완료된 상태이며, 최초 커밋과 GitHub push는 사용자가 git 전역 설정(`user.name`/`user.email`)을 완료하면 이어서 진행한다.
-- **새 `day{N}.pdf`를 받으면 다음 순서로 처리한다**: (1) pdf skill로 전체 내용 읽기 → (2) 기존 `vue-study-guide.md`/`vue-practice-exercises.md`/해당 `day{N}.md`와 비교해 차이점(새 요구사항, 스펙 변경, 새 실습 트랙 등)을 분석 → (3) 구체적인 수정 방안을 사용자에게 제시하고 승인받은 뒤에만 문서에 반영한다.
+1. **`skala-vue/docs/checklist.md`** (최우선) — 사용자가 제공한 종합과제 체크리스트. 제출 방식·마감·일자별 정확한 범위를 규정하는 가장 신뢰할 수 있는 기준.
+2. **`skala-vue/pdf/day{N}.pdf`** — 강사가 매일 제공하는 그날의 실습 강의안. 세부 구현 방법과 코드 스니펫을 제공하지만, 제출 방식 등 상위 정보는 체크리스트가 우선.
+3. **158p 이론 교재** (`vue-study-guide.md`/`vue-practice-exercises.md`의 원본) — 배경 이론과 원본 문제.
+
+**실제 제출 방식 (checklist.md 기준, 확정)**: **본인 GitHub 계정에 Public 저장소 생성**(`skala-vue`)하여 제출한다. 시크릿 창(⌘+Shift+N)으로 로그인 없이 소스가 보이는지 확인이 필수다.
+- 현재 저장소: `https://github.com/wodnjs2020136144/skala-vue` (Public 전환 완료, 로그인 없는 요청으로 200 응답 확인함).
+- ~~이전에 "이 분반은 Slack PDF 제출"이라고 판단했던 것은 착오였다~~ — 체크리스트로 GitHub Public 저장소 제출이 맞다는 것이 확인됨. 문서에 남아있는 관련 서술은 정정 완료.
+- 4일차 종합과제는 새로 만드는 게 아니라 **1~3일차 결과물을 이어서 발전시킨 것**을 제출한다. 매일 커밋/푸시가 빠지면 안 됨.
+- OpenWeatherMap API Key는 3일차(Axios 연동)에 필요하며, **계정 가입은 사용자가 직접 해야 하는 작업**(Claude가 계정 생성을 대신할 수 없음)이므로 미리 안내만 하고 실제 가입/키 발급은 사용자에게 요청한다.
+
+**새 `day{N}.pdf`를 받으면 다음 순서로 처리한다**: (1) pdf skill로 전체 내용 읽기 → (2) `checklist.md`/기존 문서/해당 `day{N}.md`와 비교해 차이점을 분석 → (3) 구체적인 수정 방안을 사용자에게 제시하고 승인받은 뒤에만 문서에 반영한다.
 
 ## 실습 기록 규칙
 

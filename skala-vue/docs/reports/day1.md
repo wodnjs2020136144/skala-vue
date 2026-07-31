@@ -146,7 +146,11 @@
 **느낀점**
 - 이론 교재와 실제 진행 강의안이 항목 범위·구현 방식에서 미묘하게 다를 수 있다는 것을 확인했다. 처음부터 "어느 자료가 최종 기준인지" 우선순위를 명확히 해두지 않았다면, 나중에 서로 다른 스펙(예: 검색을 `v-model`로 할지 `:value`+`@input`으로 할지)으로 헷갈렸을 것 같다. 또한 제출 형식(GitHub 저장소)까지 미리 확인해두어, 실습이 다 끝난 뒤에야 "저장소가 없다"는 걸 알게 되는 상황을 피할 수 있었다.
 
-> 이후 사용자 확인 결과, 이 분반은 git/GitHub 제출이 아닌 **Slack에 PDF로 제출**하는 방식이며, `day1.pdf`의 GitHub 안내는 이 분반에는 적용되지 않는다는 것이 확인되었다. 다만 형상관리 목적으로 별도 GitHub Private 저장소를 두기로 했으며, 이 작업은 사용자의 git 전역 설정(`user.name`/`user.email`) 완료 후 이어서 진행할 예정이다.
+> 이후 사용자 확인 결과, 이 분반은 git/GitHub 제출이 아닌 **Slack에 PDF로 제출**하는 방식이며, `day1.pdf`의 GitHub 안내는 이 분반에는 적용되지 않는다는 것이 확인되었다. 다만 형상관리 목적으로 별도 GitHub Private 저장소를 두기로 했으며, 이 작업은 사용자의 git 전역 설정(`user.name`/`user.email`) 완료 후 이어서 진행하기로 했다.
+>
+> **[중간 해결]** 사용자가 `git config --global user.name "hwangjaewon"`, `user.email "wgikimi11@gmail.com"`을 설정 완료. 이후 `study_to_vuejs/`에서 전체 파일을 `git add` → 최초 커밋(`8108bf7`) → `gh repo create skala-vue --private --source=. --remote=origin`으로 GitHub Private 저장소 생성 → `git push -u origin main`으로 push까지 완료.
+>
+> **[최종 정정]** 사용자가 강사로부터 받은 종합과제 체크리스트(`docs/checklist.md`)를 공유했고, 이를 통해 **실제 제출 방식은 Slack PDF가 아니라 본인 GitHub 계정의 Public 저장소 제출**이 맞다는 것이 확인됐다. 앞서 "Slack 제출"이라고 판단했던 것은 착오였다. 이에 따라 `gh repo edit wodnjs2020136144/skala-vue --visibility public`으로 저장소를 Public으로 전환했고, 로그인 세션 없는 `curl` 요청으로 200 응답을 받아 비로그인 접근이 가능함을 확인했다(체크리스트가 요구하는 "시크릿 창 확인"과 동등한 검증). 이로써 Day 1 체크리스트의 "오늘 작업분 커밋 & 푸시"와 사전 준비 항목("Public 저장소 생성", "로그인 없이 확인")이 모두 완료됨.
 
 ---
 
@@ -931,3 +935,45 @@
 
 **느낀점**
 - `computed`로 파생된 값(전체/완료/남은 개수)들이 배열이 바뀔 때마다 서로 다른 필터 조건으로 각자 알아서 재계산되는 걸 보니, 하나의 원본 상태(`todos`)에서 여러 파생 지표를 뽑아내는 패턴이 실무에서 왜 유용한지 체감됐다.
+
+---
+
+## 13. 종합과제 체크리스트 반영 및 제출 방식 최종 정정
+
+**요구사항**
+- 사용자가 강사로부터 받은 4일치 종합과제 체크리스트 전문을 전달. 이를 `docs/checklist.md`로 문서화하고, 기존 문서들의 제출 방식 서술을 이 체크리스트 기준으로 정정한다.
+
+**사고 과정**
+- 체크리스트에 "GitHub Public 저장소 제출"이 명시되어 있어, 이전에 판단했던 "Slack PDF 제출"이 착오였음을 인지. 자료 간 우선순위를 `checklist.md`(최우선) > `day{N}.pdf` > 158p 이론 교재 순으로 재정립해야 향후 혼동을 막을 수 있다고 판단.
+- 체크리스트에 날짜가 명시되어 있어(1일차 7/31, 2일차 8/3, 3일차 8/4, 4일차 8/5), 기존에 "챕터 순서 = day 순서"로 느슨하게 대응시켰던 것과 달리, 실제로는 2일차에 Composition API + 컴포넌트 분리가 함께 이뤄지고 3일차에 Router/Pinia/Axios가 새로 추가된다는 걸 재확인 — day2~4.md의 목표도 이에 맞춰 갱신 필요.
+- OpenWeatherMap API Key 발급은 회원가입이 필요한 작업이라 Claude가 대신 할 수 없으므로, 사용자에게 직접 안내만 하기로 함.
+
+**해결 과정**
+1. `skala-vue/docs/checklist.md` 신규 생성 — 체크리스트 전문을 그대로 문서화하고 "최우선 기준 자료"임을 명시.
+
+   #### `docs/checklist.md` (신규 문서, 전체 체크리스트 보관 — 본문 생략, 실제 내용은 해당 파일 참고)
+
+2. GitHub 저장소 공개 설정 변경:
+   ```bash
+   gh repo edit wodnjs2020136144/skala-vue --visibility public --accept-visibility-change-consequences
+   ```
+3. 로그인 없는 요청으로 접근 가능 여부 확인:
+   ```bash
+   curl -s -o /dev/null -w "%{http_code}\n" "https://github.com/wodnjs2020136144/skala-vue"
+   # → 200
+   ```
+4. `CLAUDE.md`에 자료 우선순위(체크리스트 > day{N}.pdf > 158p 교재)와 정정된 제출 방식(GitHub Public), OpenWeatherMap 안내를 반영.
+5. `vue-practice-exercises.md`, `day1.md`(본 항목 포함)의 "Slack 제출" 관련 서술을 GitHub Public 제출로 정정.
+
+**트러블슈팅**
+- **문제**: 이전 세션에서 "이 분반은 Slack PDF 제출"이라고 판단해 `CLAUDE.md`/`day1.md`/`vue-practice-exercises.md`/`final-report.md`에 그 내용을 반영해뒀는데, 실제로는 GitHub Public 저장소 제출이 맞는 것으로 확인됨.
+- **원인**: 사용자의 초기 발화("우리 분반은 git을 사용하지 않고...")를 그대로 받아들여 문서에 반영했으나, 이후 공식 체크리스트를 받아보니 실제 제출 방식은 GitHub였음. 사용자 본인도 초기엔 정확한 제출 방식을 몰랐던 것으로 보임.
+- **해결**: 체크리스트를 최우선 기준 자료로 격상시키고, 관련 문서의 서술을 모두 GitHub Public 저장소 제출로 정정. 이미 만들어뒀던 GitHub 저장소(당시 Private)를 Public으로 전환.
+
+**결과**
+- `docs/checklist.md` 생성 완료.
+- GitHub 저장소가 Public으로 전환되고 비로그인 접근이 가능함을 확인 (curl 200 응답).
+- `CLAUDE.md`, `vue-practice-exercises.md`, `day1.md`의 제출 방식 서술 정정 완료.
+
+**느낀점**
+- 사용자가 전달한 정보라도 잠정적인 것일 수 있다는 걸 배웠다 — "Slack 제출이다"라는 말을 곧이곧대로 문서에 박아 넣었는데, 나중에 공식 체크리스트로 뒤집혔다. 앞으로는 이런 종류의 확정 정보(제출 방식처럼 되돌리기 번거로운 것)는 "현재까지 확인된 바로는"이라는 식으로 유보적으로 기록해두는 게 더 안전했을 것 같다. 다행히 형상관리용으로 미리 만들어둔 저장소가 있어서 Private→Public 전환만으로 빠르게 대응할 수 있었다.

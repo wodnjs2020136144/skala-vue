@@ -63,12 +63,12 @@ function showDetail(cityName, status) {
 
 > 출처: `pdf/day1.pdf` (DreamIT Biz 실습 강의안, 2026-07-31, 09:00~18:00, 8교시)
 >
-> ⚠️ **이 분반의 실제 제출 방식은 결과물을 PDF로 정리해 Slack에 제출하는 것이다 (GitHub 제출 아님).** 아래 "정본 저장소 Fork/Clone" 등 GitHub 관련 문구는 `day1.pdf`의 일반 안내이며 이 분반에는 적용되지 않는다. 형상관리(버전 관리)는 별도 GitHub Private 저장소로 개인적으로만 운영한다.
+> ⚠️ **[정정] 실제 제출 방식은 본인 GitHub 계정에 Public 저장소(`skala-vue`)를 생성해 제출하는 것이다.** (한때 "Slack PDF 제출"로 잘못 판단했으나, `docs/checklist.md` 확인 결과 GitHub Public 저장소 제출이 맞는 것으로 정정됨) 아래 "정본 저장소 Fork/Clone" 문구는 참고용이며, 실제로는 본인 저장소(`skala-vue`)를 직접 만들어 커밋/푸시하면 된다. 최신 제출 기준은 [checklist.md](./checklist.md) 참고.
 
 ### 종합과제 1단계 — 날씨 Mockup (`day1.pdf` 스펙, 이것이 실제 제출 기준)
 
 **요구사항**
-1. ~~정본 저장소(`https://github.com/bottletiger/skala-vue`)를 Fork/Clone. 본인 계정 저장소 이름은 `skala-vue`.~~ (이 분반은 GitHub 제출이 아니므로 생략 가능 — 형상관리용 개인 저장소는 별도 운영)
+1. 본인 GitHub 계정에 Public 저장소 `skala-vue`를 생성한다 (정본 `bottletiger/skala-vue`를 Fork/Clone해도 되고, 직접 새 저장소를 만들어 커밋해도 된다). 시크릿 창으로 로그인 없이 소스가 보이는지 확인한다.
 2. 아래 정확한 데이터로 `weatherList`를 선언한다:
    ```js
    const weatherList = ref([
