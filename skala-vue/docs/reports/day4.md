@@ -327,6 +327,129 @@
 
 ---
 
+## 5. 지도 배경 인터랙션 재설계 — 캐릭터·입체 효과 실험을 거쳐 평면 통합 그리드 + 성능 최적화된 파동으로 정착
+
+**요구사항**
+- `/map` 바다 배경에 커서 인터랙션을 추가해달라는 요청이 여러 차례 이어졌다. 처음엔 "바다를 헤엄치는 픽셀 캐릭터"와 "커서를 따라다니는 웨이브 잔상"을 요청받았고, 실제로 보여준 뒤에는 "캐릭터는 다 지워달라, 배경 자체가 커서 위치에 따라 눌리는 느낌을 원한다"로 방향이 바뀌었으며, 다시 "입체감(3D)이 아니라 평면 그래픽 기반으로", 마지막엔 "파동 효과가 렉이 심하니 최적화"까지 요구사항이 단계적으로 좁혀졌다.
+
+**사고 과정**
+- 캐릭터(범고래·물고기)와 웨이브 잔상은 `KoreaMapDots`(한반도 그리드, 최대 420px 폭의 독립 DOM)와 바다(전체 화면을 덮는 CSS `background-image` 트릭)가 서로 다른 좌표계였던 구조 위에 얹었더니, "다른 색 픽셀이 따라오는 것"처럼만 보이고 진짜 "눌림"이 아니라는 피드백을 받았다. 근본 원인이 좌표계 분리에 있다고 판단해, 캐릭터를 걷어내는 김에 육지·바다를 화면 전체를 채우는 **하나의 실제 DOM 도트 그리드**로 통합하기로 했다 — 이후 정렬 문제가 구조적으로 사라지는 부수 효과도 얻었다.
+- 통합 그리드로 바꾼 직후엔 바다 도트에 `radial-gradient`, 육지 도트에 `box-shadow: inset`을 넣어 입체감(양각)을 줬는데, "이 3D 느낌은 원한 게 아니다, 평면으로 돌아가되 눌림 파동은 유지해달라"는 피드백을 받아 그러데이션·그림자를 모두 걷어내고 `filter: brightness()`(색이 밝아졌다 사라지는 방식)로 파동을 다시 표현했다.
+- 성능 문제의 원인을 진단해보니, 파동 강도(`pressIntensity`)를 각 도트의 Vue reactive 속성으로 두고 있었다. 도트 배열이 컴포넌트 하나의 `v-for`(약 5,000개)로 전부 그려지기 때문에, 단 하나의 도트 값만 바뀌어도 Vue가 이를 "같은 렌더 이펙트의 의존성 변경"으로 취급해 5,000개 전체를 다시 diff했다 — `requestAnimationFrame`으로 초당 최대 60번 이 작업이 발생하니 렉이 심할 수밖에 없었다. 해법은 애니메이션 경로에서 Vue 반응형을 완전히 배제하고, 영향받는 소수의 실제 DOM 엘리먼트에 `style.setProperty`로 직접 쓰는 것이었다.
+
+**해결 과정**
+1. (1차 시도, 이후 롤백) `src/components/practices/weather/SeaCreature.vue`를 만들어 문자 매트릭스로 범고래·물고기 픽셀 스프라이트를 그리고, `requestAnimationFrame` 루프로 화면을 가로질러 이동시켰다. 커서 웨이브는 `trailPoints` 배열에 좌표를 쌓았다 700ms 후 제거하는 방식으로 구현했으나, 두 기능 모두 "원하는 방향이 아니다"라는 피드백을 받아 다음 단계에서 전부 제거했다.
+2. `SeaCreature.vue`를 삭제하고, `src/components/practices/weather/KoreaMapDots.vue`를 전면 재작성했다. 더 이상 22×41 고정 크기가 아니라 부모 컨테이너 크기에 맞춰 `cols = round(width / DOT_PX)`, `rows = round(height / DOT_PX)`로 그리드를 만들고, 기존 `KOREA_MATRIX`를 이 그리드 중앙에 배치해 셀마다 `isLand` 여부를 판정했다. 도시 마커 좌표도 오프셋을 더해 전체 그리드의 절대 좌표로 재매핑했다.
+3. 커서가 지나간 자리마다 "파동 원점"(`{col, row, startTime}`)을 등록하고, `requestAnimationFrame` 루프가 매 프레임 `ringRadius = elapsed * WAVE_SPEED`만큼 퍼져나가는 링 모양 강도를 `Math.cos((distance - ringRadius) * k)`로 계산해 감쇠시키는 방식으로 눌림 파동을 구현했다.
+4. 성능 문제 진단 후, 도트 객체에서 `pressIntensity`를 제거하고 `dot.index`(row-major 순번)만 남겼다. `buildGrid()` 이후 `nextTick()`에서 실제 DOM 엘리먼트 배열(`dotElements`)을 한 번 수집해두고, 파동 계산 결과를 `dotElements[dot.index].style.setProperty('--intensity', ...)`로 직접 써서 Vue 렌더 사이클을 완전히 우회했다.
+
+   #### `src/components/practices/weather/KoreaMapDots.vue` (직접 DOM 조작으로 바꾼 핵심 부분)
+   ```js
+   let dotElements = []
+   async function refreshDotElements() {
+     await nextTick()
+     if (!rootRef.value) return
+     dotElements = Array.from(rootRef.value.querySelectorAll('.korea-map__dot'))
+   }
+
+   function tickRipples() {
+     // ...ripple별 링 강도를 frameIntensity Map에 모은 뒤...
+     frameIntensity.forEach((intensity, key) => {
+       const dot = dotsByKey.get(key)
+       const el = dot && dotElements[dot.index]
+       if (el) el.style.setProperty('--intensity', intensity) // Vue 반응형을 거치지 않음
+     })
+     touchedLastFrame.forEach((key) => {
+       if (!frameIntensity.has(key)) {
+         const el = dotsByKey.get(key) && dotElements[dotsByKey.get(key).index]
+         if (el) el.style.removeProperty('--intensity')
+       }
+     })
+   }
+   ```
+
+5. 평면 디자인 피드백을 반영해 도트 CSS에서 `radial-gradient`/`box-shadow: inset`을 모두 제거하고 단색 배경 + `filter: brightness(calc(1 + var(--intensity, 0) * 0.9))`로 교체했다.
+6. 화면 가장자리에 여백이 남는 문제(그리드가 `cols * DOT_PX` 고정 픽셀로 그려지다 보니 컨테이너 폭과 딱 맞지 않아 남는 부분에 배경색 띠가 보임)를 `grid-template-columns: repeat(cols, 1fr)`로 바꿔 해결했고, `.weather-map`의 `padding: 28px`도 제거해 도트가 뷰포트 끝까지 채워지게 했다.
+7. 브라우저에서 확인 — 바다·육지가 완전히 평면 단색으로 보이는지, 가장자리까지 도트가 빈틈없이 채워지는지, 마우스를 빠르게 움직여도 눈에 띄는 끊김 없이 파동이 표시되는지 확인했다.
+
+**트러블슈팅**
+- **문제**: 통합 그리드로 바꾼 직후, `.korea-map` 요소의 실제 렌더링 높이가 CSS로 지정한 `height: 100%`를 무시하고 콘텐츠 한 줄(14px) 높이로만 잡혀, 한반도 그리드가 화면 맨 위 한 줄에만 짓눌린 채로 나타났다.
+- **원인**: `.korea-map`의 부모(`.weather-map__grid-area`)가 `flex: 1`(= `flex-basis: 0%`)로 크기를 부여받는 flex 아이템인데, 퍼센트 높이(`height: 100%`)를 가진 자식은 이런 "grow로 크기가 결정되는" flex 아이템을 정의된 높이로 인식하지 못하는 경우가 있어 percentage-height 해석이 깨지는 CSS 특성이 원인이었다.
+- **해결**: `.korea-map`을 `height: 100%` 대신 `position: absolute; inset: 0;`으로 바꿔, 퍼센트 높이 해석에 기대지 않고 부모의 패딩 박스를 직접 채우도록 했다.
+- **문제**: 파동 로직을 다 고친 뒤에도 자동화 브라우저 탭에서 시각적으로 애니메이션이 전혀 재생되지 않는 것처럼 보였다.
+- **원인**: `document.visibilityState`가 `hidden`으로 보고되는 자동화 탭 환경이라 Chrome이 `requestAnimationFrame` 콜백 자체를 완전히 중단시키고 있었다(일반 사용자가 눈으로 보는 포그라운드 탭에서는 발생하지 않는, 테스트 환경 고유의 제약).
+- **해결**: 파동 공식(링 반경·감쇠)을 Node.js로 독립 실행해 원점에서 거리·시간에 따라 정확히 링 모양으로 퍼져나가는지 수치로 검증하는 방식으로 로직 정확성을 대신 확인했다.
+
+**결과**
+- `/map` 진입 시 바다·육지 모두 완전히 평면(단색)으로 보이고, 화면 가장자리까지 도트가 여백 없이 채워짐을 확인했다.
+- 커서를 움직이면 지나간 자리에서 밝기가 링 모양으로 퍼졌다 사라지는 파동이 재생되고, 이 경로가 더 이상 Vue 반응형을 거치지 않아(수천 개 도트 재렌더 → 수십~백여 개 DOM 직접 조작으로 축소) 체감 렉이 크게 줄었다.
+
+![Day 4 지도 인터랙션 — 평면 그리드, 가장자리까지 채워진 도트](./images/day4/14-map-flat-edge-to-edge.jpg)
+
+**느낀점**
+- "이게 아니다"라는 피드백을 여러 번 받으며 캐릭터 → 오버레이 눌림 효과 → 입체 그리드 → 평면 그리드로 계속 갈아엎었는데, 매번 완전히 새로 만들기보다 "왜 이번 결과물이 기대와 다른가"를 구조적으로 진단(좌표계 분리, 입체 효과, Vue 반응형 비용)한 뒤 그 원인 하나만 정확히 고치는 식으로 접근하니 반복될수록 오히려 코드가 더 단순해졌다.
+- Vue의 반응형 시스템은 굉장히 편리하지만 "같은 컴포넌트 렌더 함수 안의 대량 `v-for`"와 "초당 수십 번 바뀌는 애니메이션 값"의 조합은 안티패턴에 가깝다는 걸 체감했다. 프레임 단위로 갱신되는 값은 반응형 상태로 다루지 않고 DOM을 직접 조작하는 것이, Vue를 "안 쓰는" 게 아니라 오히려 Vue가 잘하는 부분(구조적 렌더링)과 못하는 부분(고빈도 애니메이션)을 구분해서 쓰는 것이라는 걸 배웠다.
+
+---
+
+## 6. 즐겨찾기·검색·단위 전환 상단 네비게이션 통합 및 지도·상세 화면 기능 보강
+
+**요구사항**
+- 즐겨찾기 칩과 검색창을 "날씨"/"지도"/"실습 모음" 링크가 있는 상단 네비게이션으로 옮겨 어느 화면에서든 쓸 수 있게 해달라는 요청에 이어, 이후 세션에서 9가지 세부 요구사항이 추가됐다: ① 지도 탭 검색으로 해당 도시 팝업 열기, ② 홈 화면 렉 최적화, ③④ 지도 탭 즐겨찾기로 팝업 열기, ⑤ 단위(℃/℉) 전환을 지도 팝업·상세 화면에서도, ⑥ 상세 화면에 지도 팝업과 동일한 정보 표시, ⑦ 더미 날씨 데이터 토글, ⑧ 즐겨찾기 클릭 시 삭제 가능한 메뉴, ⑨ 지도 가장자리 여백 제거(5번 항목과 함께 해결), ⑩ 과제 채점 기준(`docs/checklist.md`) 이탈 여부 점검. 마지막으로 강사가 제시한 힌트(정렬 기준, 평균/최고·최저 기온 computed 등) 중 아직 구현하지 않은 부분도 함께 추가해달라는 요청을 받았다.
+
+**사고 과정**
+- 상단 네비게이션 전역화 자체는 단순했지만, "지도 탭에서 즐겨찾기 누르면 지역 팝업"과 "즐겨찾기 누르면 삭제 팝업"이 같은 클릭에 대해 다른 동작을 요구하는 것처럼 보여, 사용자에게 확인해 "클릭 시 '지도에서 보기'/'즐겨찾기 해제' 두 옵션이 있는 작은 메뉴"로 절충하기로 확정했다.
+- 홈 화면 렉의 원인을 조사해보니 `WeatherCard.vue`가 카드마다 `DotMatrixIcon`을 `animated="true"`로 띄워, 9개 도시 카드가 각자 80ms마다 36×36=1,296칸 그리드를 재계산하고 있었다. 44px짜리 작은 카드 아이콘에서는 이 미세한 애니메이션이 어차피 잘 보이지 않으므로, 리스트 카드에서는 끄고 크게 보여줄 이유가 있는 지도 팝업·상세 화면에서만 켜는 쪽으로 정리했다.
+- 지도 팝업과 상세 화면에 같은 정보를 두 번 구현하면 나중에 둘이 어긋나기 쉬우므로, 복붙 대신 공용 컴포넌트(`WeatherStatsPanel`)로 추출해 두 화면이 구조적으로 항상 같은 걸 보여주게 했다.
+- 체크리스트를 다시 읽어보며 발견한 것: 이전 세션에서 검색창을 상단 네비게이션으로 옮기며 `WeatherHomeView.vue`(=체크리스트의 `WeatherParent`)에서 `<SearchBar>` 렌더링 자체를 없앴는데, 이는 Day2 요구사항("SearchBar를 WeatherParent 안에서 props+emit으로 사용")과 어긋나는 변경이었다. 되돌리는 대신 `WeatherHomeView.vue` 안에도 같은 전역 `searchStore`를 바라보는 `<SearchBar>`를 다시 배치해, 체크리스트가 요구하는 구조와 이번에 추가한 전역 검색 UX를 동시에 만족시켰다. 반대로 Day3 요구사항("UnitToggler를 메인·상세 화면 모두에 적용")은 상세 화면에 토글이 아예 없었던 걸 발견해 이번에 함께 채워 넣었다.
+
+**해결 과정**
+1. `src/stores/searchStore.js`, `src/stores/demoStore.js`를 신규 작성했다(기존 `favoritesStore.js`와 동일한 함수형 setup 스토어 패턴). `searchStore`는 전역 검색어를, `demoStore`는 더미 데이터 사용 여부(`useDummyData`)를 담는다.
+2. `src/App.vue`의 `.app-nav`에 즐겨찾기 칩·검색창·데모 토글·단위 토글을 배치했다. 즐겨찾기 칩은 클릭 시 열리는 작은 메뉴(`app-nav__favorite-menu`)에서 "지도에서 보기"(`/map?city=id`로 이동)와 "즐겨찾기 해제"(`favoritesStore.toggleFavorite`)를 선택할 수 있게 했고, 문서 클릭 리스너로 메뉴 바깥을 클릭하면 닫히게 했다.
+
+   #### `src/App.vue` (즐겨찾기 메뉴 발췌)
+   ```js
+   function viewOnMap(city) {
+     openMenuFor.value = null
+     router.push({ name: 'weather-map', query: { city: city.id } })
+   }
+   function removeFavorite(city) {
+     openMenuFor.value = null
+     favoritesStore.toggleFavorite(city.id)
+   }
+   function handleOutsideClick(event) {
+     if (!event.target.closest('.app-nav__favorite-item')) openMenuFor.value = null
+   }
+   ```
+
+3. `src/components/practices/weather/WeatherStatsPanel.vue`를 신규 작성했다 — `city` prop 하나로 아이콘+상태+`DotStatBar` 5개(습도·구름량·가시거리·기압·낮 진행률)+체감/최저/최고/풍속 요약줄을 렌더링한다. 이때 체감·최저·최고 온도도 현재 단위(℃/℉)에 맞춰 변환하도록 고쳐, 기존에 항상 섭씨 원본으로만 보이던 사소한 불일치도 함께 바로잡았다. `WeatherMapView.vue`의 팝업과 `WeatherDetailView.vue`가 이 컴포넌트 하나를 공유한다.
+4. `src/views/WeatherMapView.vue`에 `watch(() => searchStore.query, ...)`를 추가해, 검색어가 도시 이름과 **정확히 일치**할 때만(부분 일치로 하면 첫 글자만 쳐도 팝업이 열려버림) `selectCityById`를 호출하도록 했다. 팝업 헤더에 `UnitToggler`도 추가했다.
+5. `src/services/weatherApi.js`에 `DUMMY_CONDITIONS`(6가지 날씨) 순환 배정과 `getDummyWeather(city, index)`를 추가해, API 호출 없이 즉시 6가지 아이콘/애니메이션을 확인할 수 있게 했다. `WeatherHomeView.vue`·`WeatherMapView.vue`의 데이터 로드 함수가 `demoStore.useDummyData`를 보고 실제 API 대신 이 함수로 분기하도록 했다.
+6. `src/components/practices/weather/WeatherCard.vue`의 `DotMatrixIcon`을 `animated="false"`로 바꿔 홈 화면 렉을 해소했다.
+7. `WeatherHomeView.vue`에 강사 힌트를 반영한 로직을 추가했다: 정렬 기준(`sortBy`, `v-model`로 이름순/기온순 선택 UI), 정렬 기준이 바뀔 때만 재계산되는 `sortedWeatherList` computed, 즐겨찾기 개수·검색 결과 개수·평균 기온·최고/최저 기온 도시 computed 4종, 정렬 기준 변경 시 콘솔 로그를 남기는 `watch`. 그리고 체크리스트 준수를 위해 `#search` 슬롯에 `searchStore`를 바라보는 `<SearchBar>`를 다시 배치했다.
+8. `WeatherMapView.vue`의 `.weather-map` padding을 0으로 바꿔 지도 가장자리 여백을 완전히 제거했다(5번 항목의 그리드 `1fr` 전환과 함께 적용).
+9. 브라우저에서 전체 플로우를 확인했다 — 상단 검색창에 도시명을 정확히 입력하면 어느 화면에 있든 값이 유지되고 지도로 이동 시 해당 팝업이 뜸, 즐겨찾기 칩 클릭 → 메뉴 → 지도 이동/삭제 각각 정상 동작, 지도 팝업·상세 화면 양쪽에서 단위 전환 버튼으로 ℃/℉가 즉시 바뀌고 체감/최저/최고까지 함께 변환됨, 데모 토글로 6가지 날씨가 즉시 나타남, 홈 화면에 정렬·통계 요약줄이 표시됨을 각각 확인했다.
+
+**트러블슈팅**
+- **문제**: 검증 도중 두 개의 개발 서버 프로세스가 동시에 떠 있어(5173에 좀비 프로세스, 5176에 새 프로세스) 브라우저가 옛 코드로 뜬 화면을 보여주는 바람에 한동안 수정 사항이 반영 안 된 것처럼 보였다.
+- **원인**: 이전 세션에서 종료되지 않은 `npm run dev` 프로세스가 5173 포트를 계속 점유하고 있었다.
+- **해결**: `lsof`로 점유 중인 프로세스를 확인해 정리한 뒤 서버를 깨끗하게 재시작했다.
+
+**결과**
+- 검색창·즐겨찾기·단위 전환이 모든 화면에서 동일하게 동작하고, 지도 팝업과 상세 화면의 상세 정보가 완전히 통일됐다. 홈 화면은 카드 애니메이션을 꺼서 체감 성능이 개선됐고, 정렬·통계 요약·더미 데이터 토글이 추가됐다. 체크리스트 재검토로 찾아낸 두 가지 이탈(SearchBar 위치, UnitToggler 미적용)도 이번 작업으로 함께 해소했다.
+
+![Day 4 상단 네비게이션 — 즐겨찾기 메뉴 팝오버](./images/day4/17-nav-favorite-menu-popover.jpg)
+![Day 4 지도 검색 팝업 · 단위 전환](./images/day4/15-map-search-popup.jpg)
+![Day 4 홈 화면 — 검색·정렬·통계 요약](./images/day4/18-home-search-sort-stats.jpg)
+![Day 4 홈 화면 — 더미 데이터 토글](./images/day4/19-home-dummy-data-toggle.jpg)
+![Day 4 상세 화면 — 지도 팝업과 통일된 정보 패널](./images/day4/20-detail-shared-stats-panel.jpg)
+
+**느낀점**
+- 기능을 추가하기 전에 "이미 문서화된 요구사항(체크리스트)에서 벗어난 부분이 있는지" 스스로 되짚어보는 과정이 유용했다 — 새 기능을 붙이는 데만 집중하면 이전에 잘 지키던 기준을 조용히 어기게 될 수 있다는 걸 직접 겪었다.
+- 같은 정보를 두 화면에 보여줘야 할 때 복붙이 아니라 공용 컴포넌트로 묶으면, "두 화면이 같아야 한다"는 요구사항이 유지보수 규칙이 아니라 코드 구조 자체로 보장된다는 걸 다시 확인했다(체감/최저/최고 온도 단위 변환 버그도 컴포넌트를 합치는 과정에서 자연스럽게 함께 발견하고 고칠 수 있었다).
+
+---
+
 <!--
 아래 형식을 복사해서 작업 단위마다 항목을 추가합니다.
 
