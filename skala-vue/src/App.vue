@@ -1,46 +1,41 @@
 <script setup>
-import SampleOne from './components/practices/basic/SampleOne.vue'
-import SampleTwo from './components/practices/basic/SampleTwo.vue'
-import VHtmlDemo from './components/practices/directives/VHtmlDemo.vue'
-import VTextDemo from './components/practices/directives/VTextDemo.vue'
-import VBindDemo from './components/practices/directives/VBindDemo.vue'
-import VIfShowDemo from './components/practices/directives/VIfShowDemo.vue'
-import VForDemo from './components/practices/directives/VForDemo.vue'
-import MiscDirectivesDemo from './components/practices/directives/MiscDirectivesDemo.vue'
-import VOnEventDemo from './components/practices/directives/VOnEventDemo.vue'
-import VModelFormStyleDemo from './components/practices/directives/VModelFormStyleDemo.vue'
-import WeatherParent from './components/practices/weather/WeatherParent.vue'
-import TodoListDemo from './components/practices/basic/TodoListDemo.vue'
-import FontAwesomeDemo from './components/practices/library/FontAwesomeDemo.vue'
+import { RouterLink, RouterView } from 'vue-router'
+import UnitToggler from './components/UnitToggler.vue'
 </script>
 
 <template>
-  <div style="padding: 20px">
-    <SampleOne />
-    <SampleTwo />
-    <hr />
-    <VHtmlDemo />
-    <hr />
-    <VTextDemo />
-    <hr />
-    <VBindDemo />
-    <hr />
-    <VIfShowDemo />
-    <hr />
-    <VForDemo />
-    <hr />
-    <MiscDirectivesDemo />
-    <hr />
-    <VOnEventDemo />
-    <hr />
-    <VModelFormStyleDemo />
-    <hr />
-    <WeatherParent />
-    <hr />
-    <TodoListDemo />
-    <hr />
-    <FontAwesomeDemo />
-  </div>
+  <nav class="app-nav">
+    <div class="app-nav__links">
+      <RouterLink to="/" class="app-nav__link">날씨</RouterLink>
+      <RouterLink to="/practices" class="app-nav__link">실습 모음</RouterLink>
+    </div>
+    <UnitToggler />
+  </nav>
+  <RouterView />
 </template>
 
-<style scoped></style>
+<style scoped>
+.app-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid #e7e9ec;
+}
+
+.app-nav__links {
+  display: flex;
+  gap: 16px;
+}
+
+.app-nav__link {
+  font-size: 14px;
+  font-weight: 600;
+  color: #8a8f98;
+  text-decoration: none;
+}
+
+.app-nav__link.router-link-active {
+  color: #2e3238;
+}
+</style>
