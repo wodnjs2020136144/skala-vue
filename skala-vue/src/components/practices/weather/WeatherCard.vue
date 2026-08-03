@@ -20,9 +20,8 @@ const emit = defineEmits(['select-card', 'click-detail'])
     </div>
     <div class="city-card__temp-block">
       <p class="city-card__temp">
-        {{ city.displayTemp ?? city.temp }}<span class="city-card__unit">{{
-          city.unitSymbol ?? '°'
-        }}</span>
+        {{ city.displayTemp ?? city.temp
+        }}<span class="city-card__unit">{{ city.unitSymbol ?? '°' }}</span>
       </p>
       <span class="city-card__label" :class="city.temp >= 25 ? 'is-warm' : 'is-cool'">
         {{ city.temp >= 25 ? '더움' : '선선함' }}

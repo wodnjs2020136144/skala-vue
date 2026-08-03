@@ -317,6 +317,54 @@
 
 ---
 
+## 2. Day 3 추가 실습(6~7장 Code Challenge) 조사 및 구현
+
+**요구사항**
+- 새 PDF(`...0729-159-274.pdf`) 159~209페이지(5장 Vue Router·6장 Pinia·7장 Axios)를 조사해 이론/실습 내용을 문서화하고, 종합과제 메인 라인과 별개인 Pinia·Axios Code Challenge를 `/practices/day3`에 구현한다.
+
+**사고 과정**
+- 탐색 에이전트로 해당 페이지 범위를 추출한 결과, 5장의 `[실습] 과제 - Router 활용`(p.176~177) 스펙(폴더 구조, `WeatherHomeView`/`WeatherDetailView`, "상세보기 alert 제거하고 router.push로 대체" 등)이 이미 이번 3일차 메인 실습(항목 1)에서 독자적으로 구현한 것과 사실상 동일함을 확인 — 별도로 재구현할 필요가 없다고 판단.
+- 6장(Pinia)·7장(Axios)에는 메인 앱과 별개인 순수 연습용 Code Challenge(기본 `counter.js` 스토어 데모, 수동 fetch 데모, JSONPlaceholder CRUD 데모)가 있어 이 3개를 신규 구현하기로 함.
+
+**해결 과정**
+1. `StoreCounterDemo.vue`(p.190) 생성 — 프로젝트 스캐폴딩 시 기본 생성된 `stores/counter.js`를 실제로 사용하는 첫 데모.
+
+   #### `src/components/practices/pinia/StoreCounterDemo.vue`
+   ```vue
+   <script setup>
+   import { useCounterStore } from '../../../stores/counter'
+   const counterStore = useCounterStore()
+   </script>
+   <template>
+     <div class="practice-section">
+       <p>state: {{ counterStore.count }} / getters: {{ counterStore.doubleCount }}</p>
+       <button @click="counterStore.increment">증가 (actions)</button>
+     </div>
+   </template>
+   ```
+
+2. `AxiosWeatherDemo.vue`(p.203) 생성 — 메인 앱과 달리 `onMounted` 자동 조회가 아니라 버튼을 눌러야 조회되는 수동 fetch 방식, 로딩/에러 처리 포함(광주 날씨로 메인 앱의 3개 도시와 다른 데이터를 조회해 별개 데모임을 명확히 함).
+3. `AxiosJsonDemo.vue`(p.207) 생성 — JSONPlaceholder 대상 GET/POST/PUT/DELETE 4종 메서드 모두 구현.
+4. `PracticesDay3View.vue` 신규 생성, `router/index.js`의 `/practices/day3`에 연결.
+5. `docs/vue-study-guide.md`에 5~7장(Vue Router/Pinia/Axios) 이론 섹션 추가, `docs/vue-practice-exercises.md`에 "Day 3 추가 실습" 절 추가.
+6. 브라우저에서 `/practices/day3` 렌더링 확인 — Pinia 카운터 증가, 실제 광주 날씨 API 조회, JSONPlaceholder GET/PUT(수정) 동작을 각각 실제로 클릭해 검증.
+
+**트러블슈팅**
+- 없음.
+
+**결과**
+- Pinia 카운터: state 2 / getters(2배) 4로 정상 반영.
+- Axios 수동 조회: 광주 날씨(35.31℃, 맑음, 습도 51%) 실제 데이터 정상 표시.
+- JSONPlaceholder: GET으로 3건 조회 후 "수정" 버튼 클릭 시 해당 항목 제목에 "(수정됨)"이 정상적으로 붙는 것을 확대 스크린샷으로 확인.
+
+![Day 3 추가 실습 데모(Pinia/Axios)](./images/day3/04-practices-day3.jpg)
+
+**느낀점**
+- 5장 교재의 실습 스펙을 나중에 읽어보고 나서야, 우리가 3일차에 독자적으로 설계한 구조(뷰 분리, 지연 로딩, alert 제거하고 router.push로 대체)가 교재가 의도한 정석 구조와 거의 일치한다는 걸 확인했다. 먼저 원리를 이해하고 구현한 뒤 정답과 대조해보는 순서가, 답을 먼저 보고 따라 하는 것보다 이해도가 훨씬 깊어지는 것 같다.
+- 같은 Axios라도 "자동 조회(메인 앱)"와 "수동 버튼 조회(연습 데모)"를 나란히 만들어보니, 실무에서 어떤 상황에 어떤 패턴을 쓸지 판단하는 감각이 조금 더 생겼다.
+
+---
+
 <!--
 아래 형식을 복사해서 작업 단위마다 항목을 추가합니다.
 

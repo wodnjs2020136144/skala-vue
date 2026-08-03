@@ -2,7 +2,8 @@
 import { ref } from 'vue'
 
 // 1) 일반 보간법 vs v-html 비교
-const rawHtmlData = '이 글자는 <span style="color: red; font-weight: bold;">빨간색 굵은 글자</span>이다.'
+const rawHtmlData =
+  '이 글자는 <span style="color: red; font-weight: bold;">빨간색 굵은 글자</span>이다.'
 
 // 2) v-html의 XSS 위험 데모 (alert로 안전하게 구성)
 const inputValue = ref('')

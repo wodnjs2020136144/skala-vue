@@ -111,11 +111,11 @@ LLM의 일반적인 코딩 실수를 줄이기 위한 행동 지침입니다. �
 - `skala-vue/docs/vue-study-guide.md` — 챕터별 이론 정리 (Vue 개요, Directive, Composition API, Component 등)
 - `skala-vue/docs/vue-practice-exercises.md` — `[실습]`/`Code Challenge`만 분리한 실습 목록. 실습 코드를 작성할 때는 이 문서를 먼저 참고할 것.
 
-현재 확보된 PDF는 전체 10개 챕터 커리큘럼 중 **1~4장(Vue.js 시작하기 / Vue 문법 / Composition API / Vue Component)까지만** 다룹니다. 5장(Vue Router) 이후 자료가 추가되면 위 두 문서도 이어서 갱신해야 합니다.
+전체 10개 챕터 커리큘럼(1~4장은 158p 교재, 5~10장은 159~274p 교재) 모두 확보 및 문서화 완료.
 
 이 강의의 핵심 실습은 하나의 **"날씨(Weather)" 대시보드 앱**이며, `checklist.md` 기준 실제 일정으로 점진적으로 발전합니다: 1일차(7/31) 정적 Mockup → 2일차(8/3) Composition API 적용 + 컴포넌트 4개 분리 → 3일차(8/4) Router·Pinia·Axios(실제 API 연동, ℃/℉ 토글) → 4일차(8/5) Element Plus·Modern JS 정리 및 빌드/배포. 실습 관련 작업을 할 때는 이전 단계 코드를 확장하는 흐름이라는 점을 염두에 둘 것 (새로 만드는 게 아니라 계속 이어서 발전시킴).
 
-### 자료 우선순위: 체크리스트 > day{N}.pdf > 158p 이론 교재
+### 자료 우선순위: 체크리스트 > day{N}.pdf > 158p/159-274p 이론 교재
 
 세 종류의 자료가 있으며, 서로 내용이 다르면 **위에 있는 자료가 우선한다**:
 

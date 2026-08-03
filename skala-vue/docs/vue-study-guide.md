@@ -1,8 +1,6 @@
 # Vue.js 강의 학습 가이드
 
-> 출처: `pdf/1) Full-stack Engineering_3.Frontend-framework_Vue.js_강병호_0729-1-158.pdf` (158페이지)
->
-> 이 PDF는 전체 10개 챕터 커리큘럼 중 **1~4장까지만** 담고 있습니다. 5장(Vue Router) 이후 자료가 추가로 제공되면 이 문서도 이어서 갱신합니다.
+> 출처: `pdf/1) Full-stack Engineering_3.Frontend-framework_Vue.js_강병호_0729-1-158.pdf`(1~158p, 1~4장) + `pdf/1) ..._0729-159-274.pdf`(159~274p, 5~10장) — 전체 10개 챕터 모두 확보 완료.
 >
 > 전체 커리큘럼: 1.Vue.js 시작하기 · 2.Vue 문법 · 3.Composition API · 4.Vue Component · 5.Vue Router · 6.Pinia · 7.Axios · 8.UI 라이브러리 · 9.Modern JavaScript · 10.Vite 빌드 및 실무 배포
 >
@@ -433,6 +431,339 @@ Props(데이터 주입)와 달리 Slot은 **HTML 마크업/레이아웃 조각**
 ```
 
 > 중요 개념: Slot으로 주입된 콘텐츠는 시각적으로는 자식 컴포넌트 내부에 위치하지만, **스크립트 스코프(변수/함수)는 부모(주입한 쪽) 컴포넌트에 소속**된다.
+
+---
+
+> 아래 5~10장은 `pdf/1) ..._0729-159-274.pdf`(159~274페이지)를 기준으로 작성했습니다.
+
+## 5장. Vue Router
+
+### 개요
+전통적인 웹사이트는 페이지 이동마다 서버에서 새 HTML을 받아 전체를 새로고침하지만, Vue는 SPA(Single Page Application)다. Vue Router는 브라우저 URL 변화를 JS가 가로채 서버 재요청 없이 현재 경로에 매칭된 컴포넌트만 실시간으로 교체하는 공식 라우팅 라이브러리다.
+
+### 설정 3단계
+1. `src/router/index.js`에서 `createRouter()`로 라우터 객체 생성 — `history: createWebHistory()`와 `routes` 배열(`path`/`component`/`name`) 지정. `component`는 정적 import 또는 동적 `import()`(지연 로딩)로 지정 가능.
+2. `src/main.js`에서 `app.use(router)`로 등록.
+3. `<RouterLink to="...">`로 내비게이션 링크, `<RouterView/>`로 매칭 컴포넌트를 배치. 새로고침을 유발하는 `<a>` 태그는 사용하지 않는다.
+
+### 핵심 요소
+
+| 요소 | 역할 |
+|---|---|
+| `route` | 현재 라우트 상세 정보 객체 |
+| `router` | 앱 전체 라우팅을 총괄하는 객체 |
+| `RouterView` | URL에 매칭된 페이지를 렌더링하는 내장 컴포넌트 |
+| `RouterLink` | 새로고침 없이 URL만 안전하게 변경하는 내비게이션 태그 |
+
+`views/` 폴더 컴포넌트는 `RouterView`에 직접 렌더링되는 페이지 단위 컴포넌트(접미사 `View` 권장)이고, `components/` 폴더는 재사용 가능한 UI 조각으로 라우트에 직접 매핑되지 않는다는 차이가 있다.
+
+### useRoute() — 현재 라우트 정보 조회
+- `route.params`: 동적 세그먼트 값. `path: '/weather/:cityId'`처럼 콜론으로 선언하고 `route.params.cityId`로 수신. 여러 개(`/category/:categoryId/product/:productId`) 지정도 가능.
+- `route.query`: `?search=값` 같은 쿼리 스트링을 수신. 별도 라우터 설정 없이 자유롭게 확장 가능.
+- `route.path`, `route.name`: 현재 경로/라우트 이름.
+
+### useRouter() — Programmatic Navigation
+```js
+import { useRouter } from 'vue-router'
+const router = useRouter()
+
+router.push('/')                                    // 히스토리 추가
+router.push({ name: 'WeatherDetail', params: { cityId: 'city_02' }, query: { search: '수원' } })
+router.replace('/')                                  // 히스토리 대체 (뒤로가기 불가)
+router.go(-1)                                        // 히스토리 이동
+router.back() / router.forward()
+```
+
+### Navigation Guard
+라우트 진입 전/중 접근 권한 검사·리다이렉션을 수행한다. 전역 가드(`router.beforeEach`), 라우터별 가드(Per-route), 컴포넌트 내 가드(In-component)로 구분.
+
+```js
+router.beforeEach((to, from, next) => {
+  const isAuthenticated = false
+  if (to.meta.isAuth && !isAuthenticated) {
+    alert('로그인이 필요한 서비스입니다.')
+    next('/')
+  } else {
+    next()
+  }
+})
+```
+- `beforeEach`: 이동 시작 직전. `beforeResolve`: 컴포넌트 가드/비동기 분석 완료 직후(최종 데이터 검증). `afterEach`: 네비게이션 완료 후(로그 기록 등).
+
+### Catch-all Route (미정의 경로 처리)
+정의되지 않은 경로 접근 시 `RouterView`가 빈 화면이 되므로, 라우트 배열 맨 마지막에 아래처럼 배치한다.
+```js
+{
+  path: '/:pathMatch(.*)*',
+  name: 'NotFound',
+  component: NotFoundView,
+}
+```
+
+---
+
+## 6장. Pinia
+
+### 개요
+앱이 커질수록 컴포넌트 간 데이터 전달이 어려워지므로, Pinia는 컴포넌트 계층 구조와 무관하게 전역 Store를 개설해 반응형 데이터를 관리하는 Vue 3 상태관리 라이브러리다(Vue 2의 Vuex에 대응).
+
+### Store 구성 요소
+
+| 구분 | 형태 | 역할 |
+|---|---|---|
+| state | `ref`/`reactive` | 전역 상태 데이터 |
+| getters | `computed` | state 기반 가공 값 |
+| actions | `function` | state 변경 및 비동기 통신 |
+
+### 구축 3단계
+1. `main.js`에서 `createPinia()` 인스턴스 생성 후 `app.use()`.
+2. `stores/스토어명.js`에서 `defineStore()`로 생성 — 변수명은 `use+파일명+Store` 규칙(`useCounterStore`, `useConfigStore` 등).
+3. 컴포넌트에서 store를 import해 인스턴스화 후 `store.count`, `store.doubleCount`, `store.increment` 형태로 사용.
+
+```js
+import { useCounterStore } from '@/stores/counter.js'
+const counterStore = useCounterStore()
+```
+```html
+<p>{{ counterStore.count }}</p>
+<button @click="counterStore.increment">증가</button>
+```
+
+### 자주 하는 실수 — storeToRefs
+Store의 state/getters를 그냥 구조분해하면 반응형이 끊긴다(actions는 일반 구조분해 가능).
+```js
+// ❌ 오류 유발 — 반응형 단절
+const { count, increment } = counterStore
+
+// ✅ 정석
+import { storeToRefs } from 'pinia'
+const { count, doubleCount } = storeToRefs(counterStore)
+const { increment } = counterStore
+```
+
+### 실전 패턴 — 인증 스토어(authStore) 및 Navigation Guard 연동
+JWT는 `Header.Payload.Signature` 3부분 구조이며 Base64로 누구나 복호화 가능하므로 민감정보를 담으면 안 된다. JWT는 서버 부하가 적고 확장성이 좋아 SPA에, Session은 서버가 상태를 들고 있어 보안 통제가 쉬운 전통적 웹앱에 적합하다.
+```js
+import { defineStore } from 'pinia'
+import { ref, computed } from 'vue'
+
+export const useAuthStore = defineStore('auth', () => {
+  const token = ref(localStorage.getItem('accessToken') || null)
+  const user = ref(JSON.parse(localStorage.getItem('userInfo') || 'null'))
+  const isLoggedIn = computed(() => !!token.value)
+
+  function login(userData, authToken) {
+    user.value = userData
+    token.value = authToken
+    localStorage.setItem('accessToken', authToken)
+    localStorage.setItem('userInfo', JSON.stringify(userData))
+  }
+  function logout() {
+    user.value = null
+    token.value = null
+    localStorage.removeItem('accessToken')
+    localStorage.removeItem('userInfo')
+  }
+
+  return { token, user, isLoggedIn, login, logout }
+})
+```
+```js
+router.beforeEach((to, from) => {
+  const authStore = useAuthStore()
+  if (to.meta.requiresAuth && !authStore.isLoggedIn) {
+    return { name: 'Login', query: { redirect: to.fullPath } }
+  }
+})
+```
+> 실무에서는 로그인 후 발급받은 JWT를 `Authorization: Bearer <token>` 헤더로 매 요청에 실어 보내야 하며, 이를 Axios Request Interceptor로 자동 주입하는 것이 일반적이다.
+
+---
+
+## 7장. Axios
+
+### HTTP / REST API 개념
+HTTP는 클라이언트-서버 간 표준 통신 규약(GET/POST/PUT·PATCH/DELETE)이다. REST API는 자원을 명사로 표현하고(URI에 동사 금지) HTTP Method로 행위를 표현하는 설계 원칙을 따른다. Frontend는 UI/UX 렌더링을, Backend는 비즈니스 로직/DB 관리를 담당한다.
+
+### Fetch API vs Axios
+Axios는 별도 설치가 필요하지만 JSON 자동 변환, 풍부한 에러 핸들링, `axios.create()`로 BaseURL 설정, 요청/응답 인터셉터를 기본 지원해 실무 선호도가 매우 높다.
+
+### 설치 및 기본 예제 (로딩/에러 처리)
+```bash
+npm install axios
+```
+```js
+const weatherData = ref(null)
+const isLoading = ref(false)
+
+async function handleFetchWeather() {
+  isLoading.value = true
+  try {
+    const response = await axios.get(URL)
+    weatherData.value = response.data
+  } catch (error) {
+    console.error('통신 중 에러가 발생했습니다:', error)
+    alert('데이터를 가져오지 못했습니다. API 키 활성화 여부나 주소를 확인하세요.')
+  } finally {
+    isLoading.value = false
+  }
+}
+```
+
+### 비동기 호출 방식 비교
+Promise 체인(`.then().catch().finally()`)과 async/await(`try/catch`)는 결과가 같지만, async/await가 동기 코드처럼 읽혀 실무 선호도가 높다.
+```js
+// Promise 방식
+fetchWeatherPromise()
+axios.get(URL).then((res) => { /* ... */ }).catch((err) => { /* ... */ })
+
+// async/await 방식
+async function fetchWeatherAsync() {
+  try {
+    const response = await axios.get(URL)
+  } catch (error) { /* ... */ }
+}
+```
+
+### 주요 함수
+`axios.create()`(인스턴스 생성), `axios.get/post/put/patch/delete`(단축 메서드, 모두 Promise 반환), `axios.interceptors.request/response`(요청/응답 가로채기), `axios.all()`/`axios.spread()`(병렬 요청).
+
+### 테스트용 API
+- **JSONPlaceholder** (`https://jsonplaceholder.typicode.com/posts`): 설치/키 불필요, GET/POST/PUT/DELETE 테스트용 가상 REST API.
+- **OpenWeatherMap**: 가입 후 API Key 발급, 무료 티어 월 100만 건/분당 60건. `?q={city}&appid={API_KEY}&units=metric&lang=kr` 또는 위경도 기반(`lat`/`lon`) 쿼리 지원.
+
+---
+
+## 8장. UI 라이브러리 — Element Plus
+
+### 개요
+공통 컴포넌트(Button/Input/Form/Dialog/Table 등)를 Vue 3 컴포넌트 단위로 모듈화한 오픈소스 패키지. 개발 리소스 절감, 크로스 브라우징·반응형 자동 대응, 웹 표준·접근성(WAI-ARIA) 준수 효과가 있다. Vuetify(Google Material Design), Element Plus(Enterprise Desktop, 국내 점유율/학습 편의성 최고), PrimeVue(Multi-Theme) 3사 중 Element Plus를 사용한다.
+
+### 설치 및 전역 등록
+```bash
+npm install element-plus
+```
+```js
+import ElementPlus from 'element-plus'
+import 'element-plus/dist/index.css'
+
+app.use(ElementPlus)
+```
+
+### 주요 컴포넌트 카테고리
+Basic(Button/Layout/Icon 등), Form(Input/Select/DatePicker/Upload 등), Data(Table/Card/Pagination/Tag 등), Navigation(Menu/Tabs/Breadcrumb 등), Feedback(Dialog/Message/MessageBox/Loading 등).
+
+- `ElMessage.success/warning/error(문구)`: 짧은 알림 토스트.
+- `ElMessageBox.confirm(문구, 제목, 옵션)`: Promise 기반 확인/취소 다이얼로그(`.then()`=확인, `.catch()`=취소). `type`은 `'success' | 'warning' | 'info' | 'error'`만 지원(`'danger'`는 지원 타입이 아님에 주의).
+- `<el-config-provider>`: 다국어, 컴포넌트 기본 크기 등 전역 설정 일괄 제어.
+
+---
+
+## 9장. Modern JavaScript
+
+### 역사와 브라우저 지원
+JS 탄생(1995) → ES5 표준(2009, `forEach`/`map`/`filter`) → ES6(2015) 이후 연례 업데이트 체제. 최신 브라우저는 ES6~ES11(구조분해, 화살표함수, Promise, async/await, 옵셔널 체이닝)을 100% 지원한다. Babel(다운그레이드 트랜스파일)과 Polyfill(누락 기능 임시 구현)이 Vite에 내장되어 구형 브라우저 호환을 자동 처리한다.
+
+### let / const vs var
+`var`(함수 스코프, 재선언/재할당 가능) / `let`(블록 스코프, 재할당만 가능) / `const`(블록 스코프, 재할당 불가) — 실무에서는 `const`를 기본으로, 재할당이 필요할 때만 `let`을 쓴다.
+
+### Arrow Function
+```js
+const sum = (num1, num2) => num1 + num2         // 한 줄이면 return 생략
+const pow = (x) => x * x                         // 매개변수 1개면 괄호 생략 가능
+const calculate = (a, b, operation) => operation(a, b)  // 함수를 인자로 전달(실행 대행)
+```
+
+### Template Literals
+```js
+const message = `현재 ${city}의 기온은 ${temp}도입니다.`  // 백틱 + ${} 보간, 줄바꿈 자유
+```
+
+### Destructuring Assignment
+```js
+const { name, age } = user                      // 객체: key 이름 매칭, 순서 무관
+const [latitude, longitude] = coords             // 배열: 인덱스 순서 매칭
+const [first, , third] = colors                  // 쉼표로 특정 위치 건너뛰기
+```
+
+### Spread(...) / Rest(...) 문법
+```js
+// Spread — 배열 병합/복사, 객체 속성 유지+덮어쓰기
+const fullStack = [...frontEnd, ...backEnd, 'Git']
+const newConfig = { ...baseConfig, version: 2.0, author: 'Graves' }
+
+// Rest — 나머지를 모음 (구조분해/함수 매개변수)
+const { name, age, ...restInfo } = employee
+const printMedalList = (gold, silver, ...others) => { /* others는 배열 */ }
+```
+
+### Promise / async-await
+```js
+fetchWeatherData().then((data) => { /* ... */ }).catch((e) => { /* ... */ }).finally(() => {})
+
+async function handleData() {
+  try {
+    const result = await fetchData()
+  } catch (error) { /* ... */ }
+}
+```
+
+### 유용한 Array/Object 메서드
+`Array.from()`, `find()`, `findIndex()`, `includes()`, `flat()`, `at()`, `toReversed()/toSorted()`(불변성 메서드) / `Object.assign()`, `Object.keys()/values()/entries()`, Property/Method Shorthand, Computed Property Name.
+
+### Optional Chaining(?.) / Nullish Coalescing(??)
+```js
+const finalCity = user?.profile?.address?.city ?? '등록된 주소 없음'
+
+// ?? 는 null/undefined만 판정 (|| 는 0, '', false 같은 falsy까지 덮어써서 버그 유발)
+const countOld = userSetting.alertCount || 10    // 버그: 0이 있어도 10이 됨
+const countModern = userSetting.alertCount ?? 10 // 정상: 0이면 0 유지
+```
+
+---
+
+## 10장. Vite 빌드 및 실무 배포
+
+### ESLint — 정적 코드 분석
+런타임 실행 없이 AST(추상 구문 트리) 변환 후 규칙과 대조해 오류를 사전 검출한다. Syntax Error, 미사용 변수(Dead Code), Anti-Pattern(`==` 대신 `===` 강제) 등을 점검. `eslint.config.js`에서 적용 대상/제외 폴더/전역 변수/추천 규칙/Oxlint 연동/커스텀 규칙/포맷 규칙 Off(Prettier에 위임) 순으로 구성한다.
+```js
+{
+  rules: {
+    'eqeqeq': ['error', 'always'],   // == 대신 === 강제
+    'no-console': 'off',
+  },
+}
+```
+실행: `npm run lint`(내부적으로 `oxlint . --fix` → `eslint . --fix --cache` 순차 실행).
+
+### Prettier — 코드 포맷터
+들여쓰기·따옴표·줄바꿈 등 시각적 스타일만 교정(문법 버그는 잡지 않음). `.prettierrc.json`(`semi`/`singleQuote`/`tabWidth`/`printWidth`)로 설정. 실행: `npm run format`.
+
+### Vite Configuration
+```js
+export default defineConfig({
+  plugins: [vue()],
+  resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
+  server: { port: 3000, open: true },   // 개발 서버 커스텀
+  build: { outDir: 'dist' },            // 빌드 산출물 경로
+})
+```
+
+### 환경 변수 (Environment Variables)
+Vite는 루트의 `.env` 파일을 자동 로드하며, **`VITE_` 접두사가 붙은 변수만** 클라이언트 코드에 노출된다(민감정보 노출 방지 장치).
+```
+# .env.staging
+VITE_API_URL=https://api-staging.example.com
+```
+```js
+const apiUrl = import.meta.env.VITE_API_URL
+```
+환경별 빌드: `package.json`에 `"build:staging": "vite build --mode staging"` 등록 후 실행하면 해당 `.env.staging`이 로드된다.
+
+### Bundling and Build / 배포
+개발 시에는 ESM 기반으로 즉시 서빙하고, `npm run build` 시 Rollup 엔진으로 번들링해 `dist/` 폴더(파일명에 해시가 붙어 캐시 무효화)를 생성한다. 이 정적 파일들을 AWS S3, Nginx, Netlify, Vercel, **GitHub Pages** 등에 그대로 업로드하면 배포가 끝난다.
+
+> **최종 제출 체크포인트** (교재 274p): ① ESLint 에러 제거, ② API 키는 환경 변수로 분리하고 Git에 업로드되지 않도록 처리, ③ `dist` 폴더를 GitHub Pages 등에 올려 Node.js 없이 정적 호스팅.
 
 ---
 

@@ -1,12 +1,12 @@
 # Vue.js 실습 가이드 (Practice Exercises)
 
-> 출처: `pdf/1) Full-stack Engineering_3.Frontend-framework_Vue.js_강병호_0729-1-158.pdf` (1~4장, 158페이지) — 이론 원전 교재
+> 출처: 158p 교재(1~4장) + 159~274p 교재(5~10장) — 이론 원전 교재 전체 확보 완료
 >
-> 이 문서는 위 158p 교재 안의 `[실습]`과 `Code Challenge` 항목만 분리 정리한 자료입니다. 이론 설명은 [vue-study-guide.md](./vue-study-guide.md)를 참고하세요.
+> 이 문서는 위 교재 안의 `[실습]`과 `Code Challenge` 항목만 분리 정리한 자료입니다. 이론 설명은 [vue-study-guide.md](./vue-study-guide.md)를 참고하세요.
 >
-> ⚠️ **실제 진행/제출 기준은 `pdf/day{N}.pdf`(그날의 공식 실습 강의안)입니다.** 158p 교재는 실습의 배경 이론과 원본 문제를 제공하지만, 매일 제공되는 `day{N}.pdf`가 그날 다뤄야 할 정확한 범위·데이터·요구사항을 규정하며 이 둘이 다를 경우 `day{N}.pdf`를 따릅니다. 아래 "Day별 공식 실습" 섹션에서 이 둘을 구분해 반영합니다.
+> ⚠️ **실제 진행/제출 기준은 `pdf/day{N}.pdf`(그날의 공식 실습 강의안) 및 `docs/checklist.md`입니다.** 교재는 배경 이론과 원본 문제를 제공하지만, 세부 범위·데이터·제출 방식은 체크리스트가 우선합니다. 아래 "Day별 공식 실습" 섹션에서 교재 원본과 다른 부분을 구분해 반영합니다.
 >
-> 5장(Vue Router) 이후 실습 자료가 추가되면 이 문서에 이어서 추가합니다.
+> "Day N 추가 실습" 절은 종합과제(날씨 앱) 메인 진행 라인과 별개로, 각 챕터의 자습용 Code Challenge를 실제 데모 컴포넌트로 구현해 `/practices/day{N}`에 모아둔 것입니다.
 
 ## 핵심 연속 프로젝트: "날씨(Weather)" 실습
 
@@ -214,6 +214,67 @@ Default/Named/Scoped Slot 3종 연습.
   </template>
 </BaseDashboardCard>
 ```
+
+---
+
+## Day 2 추가 실습 (3~4장 Code Challenge, 종합과제 메인 라인과 별개)
+
+> 종합과제(날씨 앱)의 2일차 메인 진행(Composition API 적용 + 컴포넌트 분리)은 이미 위에서 완료했습니다. 아래는 같은 3~4장의 별도 연습용 Code Challenge로, `/practices/day2`에 데모로 구현했습니다.
+
+### Code Challenge — Reactive State (p.107) → `ReactiveStateDemo.vue`
+`ref()`로 원시값/객체를 감싸는 법과, `reactive()`를 통째로 재할당했을 때 반응성이 끊기는 사례를 버튼으로 직접 재현.
+
+### Code Challenge — Computed & Watchers (p.125) → `ComputedWatchersDemo.vue`
+`computed`(캐싱), `watch`(특정 값 감시, newVal/oldVal), `watchEffect`(자동 추적) 3종을 각각 다른 상태에 적용해 비교.
+
+### Code Challenge — Component Lifecycle (p.136) → `LifecycleDemo.vue`
+`onMounted`에서 `setInterval` 타이머 시작, `onUpdated` 콘솔 로그, `onUnmounted`에서 `clearInterval`로 정리하는 표준 패턴.
+
+### Code Challenge — Props & Emits (p.152) → `PropsEmitsDemo.vue` + `PropsEmitsChild.vue`
+부모가 `props`로 메시지를 자식에 전달하고, 자식이 버튼 클릭 시 `emit`으로 부모 상태를 갱신하는 왕복 통신 예제.
+
+### Code Challenge — Component Slot (p.157) → `SlotDemo.vue` + `SlotDemoChild.vue`
+Default/Named/Scoped Slot 3종을 하나의 자식 컴포넌트에서 함께 시연.
+
+---
+
+## Day 3 추가 실습 (5~7장 Code Challenge, 종합과제 메인 라인과 별개)
+
+> 종합과제의 3일차 메인 진행(Router/Pinia/Axios 실전 적용)은 이미 위에서 완료했습니다. 5장(Vue Router)의 `[실습] 과제 - Router 활용`(p.176~177)은 사실 우리가 이미 구현한 메인 종합과제(`WeatherHomeView`/`WeatherDetailView`/지연 로딩/Catch-all)와 스펙이 거의 동일함을 확인했습니다. 아래는 6~7장의 별도 연습용 Code Challenge로, `/practices/day3`에 데모로 구현했습니다.
+
+### Code Challenge — Pinia (p.190) → `StoreCounterDemo.vue`
+기본 제공되는 `stores/counter.js`(setup 스토어)를 컴포넌트에서 `useCounterStore()`로 불러와 `count`(state)/`doubleCount`(getters)/`increment`(actions) 사용.
+
+### Code Challenge — Axios (p.203, p.208) → `AxiosWeatherDemo.vue`
+버튼을 눌러야 조회되는 수동 fetch 방식(메인 앱의 `onMounted` 자동 조회와 대비), 로딩/에러 상태 처리.
+
+### JSONPlaceholder CRUD 예제 (p.207) → `AxiosJsonDemo.vue`
+`https://jsonplaceholder.typicode.com/posts`를 대상으로 GET(조회)/POST(생성)/PUT(수정)/DELETE(삭제) 4종 메서드를 모두 실습.
+
+---
+
+## Day 4 추가 실습 (8~9장 Code Challenge)
+
+> 10장(ESLint/Prettier/env/build)의 Code Challenge는 컴포넌트가 아니라 "명령 실행·설정 파일 작성" 성격이라 4일차 메인 실습(빌드/배포)에서 자연스럽게 함께 진행합니다. 아래 8~9장 Code Challenge는 `/practices/day4`에 데모로 구현했습니다.
+
+### Code Challenge — Element Plus 회원가입 폼 (p.225) → `SignupFormChallenge.vue`
+이메일 형식 검증, 약관 동의 체크, `ElMessage`로 성공/경고/에러 토스트 표시.
+
+### Code Challenge — Element Plus 구매 수량 & 별점 (p.226) → `ProductQuantityChallenge.vue`
+`el-input-number`(수량), `el-rate`(별점) 컴포넌트 사용.
+
+### Code Challenge — Element Plus 삭제 확인 & 다운로드 진행률 (p.227) → `FileDeleteProgressChallenge.vue`
+`ElMessageBox.confirm`으로 삭제 확인 다이얼로그, `el-progress` + `setInterval`로 진행률 애니메이션.
+> 교재 원본 코드는 `ElMessageBox.confirm`의 `type: 'danger'`를 사용했으나, Element Plus는 `'success' | 'warning' | 'info' | 'error'`만 지원하므로 `'warning'`으로 수정해 구현했습니다.
+
+### Code Challenge — Modern JS 과제 1: 데이터 추출 및 포맷팅 (p.247) → `DataExtractChallenge.vue`
+`Array.includes()`로 배열 포함 여부 확인, 중첩 객체 구조분해(`const { grade, details: { score } } = rawData`), 템플릿 리터럴로 결과 포맷팅.
+
+### Code Challenge — Modern JS 과제 2: 불변성 복사 및 데이터 방어 (p.248) → `CartDefenseChallenge.vue`
+스프레드 연산자로 배열 불변 병합, 옵셔널 체이닝(`?.`)+널 병합(`??`) 연쇄로 기본값 방어.
+
+### Code Challenge — Modern JS 과제 3: 비동기 연쇄 파이프라인 (p.249) → `AsyncChainChallenge.vue`
+`async/await`로 두 개의 Promise 반환 함수를 순차 호출(연쇄), `try/catch`로 에러 방어.
 
 ---
 

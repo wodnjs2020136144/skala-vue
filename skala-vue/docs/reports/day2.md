@@ -270,6 +270,57 @@
 
 ---
 
+## 2. Day 2 추가 실습(3~4장 Code Challenge) 구현 및 `/practices` 일자별 재구성
+
+**요구사항**
+- 4일차 메인 실습(Element Plus 적용 등)에 들어가기 전에, 1일차만 구현했던 챕터별 자습용 Code Challenge를 2~4일차 분까지 모두 조사·문서화·구현한다. 이번 항목은 그중 2일차 분(3장 Composition API, 4장 Vue Component의 별도 Code Challenge — 종합과제 메인 라인과는 무관)이다.
+- 기존 `/practices` 단일 페이지(1일차 데모만 있음)를 일자별로 재구성한다.
+
+**사고 과정**
+- 3장/4장 Code Challenge는 이미 `vue-practice-exercises.md`에 문서화만 되어 있고 실제 컴포넌트로 구현된 적이 없었다는 것을 확인.
+- `/practices`를 `/practices/day1`~`day4` + 인덱스 페이지로 나누는 것이 "일자별로 구분해서 정리"라는 사용자 요청에 가장 부합한다고 판단, 기존 `PracticesView.vue`를 `views/practices/PracticesDay1View.vue`로 이동.
+
+**해결 과정**
+1. `ReactiveStateDemo.vue`(ref vs reactive, p.107) 생성.
+
+   #### `src/components/practices/composition/ReactiveStateDemo.vue`
+   ```vue
+   <script setup>
+   import { ref, reactive } from 'vue'
+
+   const count = ref(0)
+   const user = ref({ name: '이순신', age: 30 })
+   let state = reactive({ count: 0 })
+
+   function increaseRef() { count.value++ }
+   function changeUserName() { user.value.name = user.value.name === '이순신' ? '장보고' : '이순신' }
+   function increaseReactiveSafe() { state.count++ }
+   function breakReactiveUnsafe() { state = { count: 999 } } // 반응성 끊김 재현
+   </script>
+   ```
+
+2. `ComputedWatchersDemo.vue`(computed/watch/watchEffect, p.125) 생성 — computed 캐싱, watch(newVal/oldVal), watchEffect 자동 추적을 각각 다른 상태에 적용.
+3. `LifecycleDemo.vue`(p.136) 생성 — `onMounted`에서 `setInterval` 시작, `onUnmounted`에서 `clearInterval`로 정리.
+4. `PropsEmitsDemo.vue` + `PropsEmitsChild.vue`(p.152) 생성 — 부모→자식 props, 자식→부모 emit 왕복 통신.
+5. `SlotDemo.vue` + `SlotDemoChild.vue`(p.157) 생성 — Default/Named/Scoped Slot 3종을 한 화면에서 시연.
+6. 기존 `src/views/PracticesView.vue`를 `src/views/practices/PracticesDay1View.vue`로 이동(상대 경로 한 단계 조정), `PracticesDay2View.vue`(이번 5개 데모) 신규 생성.
+7. `PracticesIndexView.vue` 신규 생성(Day1~4 링크 목록), `router/index.js`에 `/practices`(인덱스)·`/practices/day1~4` 라우트를 지연 로딩으로 재등록.
+8. 브라우저에서 `/practices/day2` 렌더링 확인, reactive "위험" 버튼을 눌러 반응성이 실제로 끊기는지 검증.
+
+**트러블슈팅**
+- 없음.
+
+**결과**
+- `/practices/day2`에서 5개 Code Challenge 데모 모두 정상 렌더링.
+- reactive 재할당 버튼 클릭 후 이후 어떤 버튼을 눌러도 `state.count` 표시가 갱신되지 않음을 확인(의도된 반응성 단절 재현 성공).
+
+![Day 2 추가 실습 데모](./images/day2/03-practices-day2.jpg)
+
+**느낀점**
+- 이미 메인 종합과제에서 Composition API를 실전 적용해봤지만, ref/reactive의 반응성 단절처럼 "실패하는 모습"을 일부러 만들어보는 별도 데모가 개념을 더 선명하게 각인시켜준다는 걸 느꼈다. 실전 코드에서는 이런 실수를 피하려고만 하지, 직접 재현해보는 경우는 드물기 때문이다.
+
+---
+
 <!--
 아래 형식을 복사해서 작업 단위마다 항목을 추가합니다.
 

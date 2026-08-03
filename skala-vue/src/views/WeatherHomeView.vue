@@ -42,8 +42,7 @@ const filteredWeatherList = computed(() =>
 const displayWeatherList = computed(() =>
   filteredWeatherList.value.map((city) => ({
     ...city,
-    displayTemp:
-      configStore.unit === 'imperial' ? Math.round((city.temp * 9) / 5 + 32) : city.temp,
+    displayTemp: configStore.unit === 'imperial' ? Math.round((city.temp * 9) / 5 + 32) : city.temp,
     unitSymbol: configStore.unitSymbol,
   })),
 )

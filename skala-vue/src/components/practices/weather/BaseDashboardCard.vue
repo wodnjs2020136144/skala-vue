@@ -22,12 +22,7 @@
   padding: 28px;
   background: #f6f7f8;
   border-radius: 20px;
-  font-family:
-    -apple-system,
-    BlinkMacSystemFont,
-    'Segoe UI',
-    'Pretendard',
-    sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Pretendard', sans-serif;
 }
 
 .dashboard-card__list {
