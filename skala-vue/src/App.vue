@@ -9,7 +9,7 @@ import VForDemo from './components/practices/directives/VForDemo.vue'
 import MiscDirectivesDemo from './components/practices/directives/MiscDirectivesDemo.vue'
 import VOnEventDemo from './components/practices/directives/VOnEventDemo.vue'
 import VModelFormStyleDemo from './components/practices/directives/VModelFormStyleDemo.vue'
-import WeatherMockup from './components/practices/weather/WeatherMockup.vue'
+import WeatherParent from './components/practices/weather/WeatherParent.vue'
 import TodoListDemo from './components/practices/basic/TodoListDemo.vue'
 import FontAwesomeDemo from './components/practices/library/FontAwesomeDemo.vue'
 </script>
@@ -35,7 +35,7 @@ import FontAwesomeDemo from './components/practices/library/FontAwesomeDemo.vue'
     <hr />
     <VModelFormStyleDemo />
     <hr />
-    <WeatherMockup />
+    <WeatherParent />
     <hr />
     <TodoListDemo />
     <hr />

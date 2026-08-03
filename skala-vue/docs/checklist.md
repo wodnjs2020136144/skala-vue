@@ -55,6 +55,6 @@
 | 날짜 | 단계 | 상세 기록 | 상태 |
 |---|---|---|---|
 | 7/31 (1일차) | 날씨 Mockup | [day1.md](./reports/day1.md) | 사전 준비 일부 진행 중, 실습 항목 진행 중 |
-| 8/3 (2일차) | 컴포지션 + 컴포넌트 분리 | [day2.md](./reports/day2.md) | 예정 |
+| 8/3 (2일차) | 컴포지션 + 컴포넌트 분리 | [day2.md](./reports/day2.md) | 완료 |
 | 8/4 (3일차) | Router·Pinia·Axios | [day3.md](./reports/day3.md) | 예정 |
 | 8/5 (4일차) | 마무리 + 제출 | [day4.md](./reports/day4.md) | 예정 |
