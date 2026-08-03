@@ -5,15 +5,23 @@ import BaseDashboardCard from '../components/practices/weather/BaseDashboardCard
 import SearchBar from '../components/practices/weather/SearchBar.vue'
 import WeatherCard from '../components/practices/weather/WeatherCard.vue'
 import { useConfigStore } from '../stores/configStore'
-import { CITY_LIST, fetchCurrentWeather } from '../services/weatherApi'
+import { useSearchStore } from '../stores/searchStore'
+import { useFavoritesStore } from '../stores/favoritesStore'
+import { useDemoStore } from '../stores/demoStore'
+import { CITY_LIST, fetchCurrentWeather, getDummyWeather } from '../services/weatherApi'
 
 const router = useRouter()
 const configStore = useConfigStore()
+const searchStore = useSearchStore()
+const favoritesStore = useFavoritesStore()
+const demoStore = useDemoStore()
 
-// 반응형 상태 3종 (day2에서 이어짐) — weatherList는 이제 Axios로 받아온 실데이터로 채워진다.
+// 반응형 상태 (day2에서 이어짐) — weatherList는 이제 Axios로 받아온 실데이터로 채워진다.
+// 검색어는 상단 네비게이션의 전역 검색창(searchStore)을 그대로 읽는다.
 const weatherList = ref([])
-const searchQuery = ref('')
 const selectedCityInfo = ref(null)
+// 정렬 기준: 강사 힌트("정렬 기준이 바뀔 때만 재계산되는 computed", "v-model로 선택 UI") 반영.
+const sortBy = ref('name') // 'name' | 'temp'
 
 const isLoading = ref(true)
 const loadError = ref('')
@@ -22,7 +30,9 @@ async function loadWeatherList() {
   isLoading.value = true
   loadError.value = ''
   try {
-    weatherList.value = await Promise.all(CITY_LIST.map((city) => fetchCurrentWeather(city)))
+    weatherList.value = demoStore.useDummyData
+      ? CITY_LIST.map((city, index) => getDummyWeather(city, index))
+      : await Promise.all(CITY_LIST.map((city) => fetchCurrentWeather(city)))
   } catch (err) {
     loadError.value = '날씨 정보를 불러오지 못했습니다. API Key와 네트워크 상태를 확인해 주세요.'
     console.error('[WeatherHomeView] 날씨 조회 실패:', err)
@@ -32,10 +42,11 @@ async function loadWeatherList() {
 }
 
 onMounted(loadWeatherList)
+watch(() => demoStore.useDummyData, loadWeatherList)
 
 // 검색어가 비면 원본 전체, 일치하면 필터링된 결과가 자연히 반환됨
 const filteredWeatherList = computed(() =>
-  weatherList.value.filter((city) => city.name.includes(searchQuery.value)),
+  weatherList.value.filter((city) => city.name.includes(searchStore.query)),
 )
 
 // 화면 표시용 온도만 단위에 맞춰 변환하고, 더움/선선함 판정은 항상 섭씨 원본(city.temp) 기준으로 유지한다.
@@ -47,17 +58,48 @@ const displayWeatherList = computed(() =>
   })),
 )
 
+// 정렬 기준이 바뀔 때만 다시 정렬된다(displayWeatherList/sortBy 둘 다 안 바뀌면 재계산 없음).
+const sortedWeatherList = computed(() => {
+  const list = [...displayWeatherList.value]
+  if (sortBy.value === 'temp') {
+    return list.sort((a, b) => b.temp - a.temp)
+  }
+  return list.sort((a, b) => a.name.localeCompare(b.name, 'ko'))
+})
+
+// 즐겨찾기 개수·검색 결과 개수·평균 기온·최고/최저 기온 도시 — 전부 목록이 바뀔 때만 재계산되는 computed.
+const favoriteCount = computed(
+  () => weatherList.value.filter((city) => favoritesStore.isFavorite(city.id)).length,
+)
+const filteredCount = computed(() => filteredWeatherList.value.length)
+const averageTemp = computed(() => {
+  if (weatherList.value.length === 0) return null
+  const sum = weatherList.value.reduce((acc, city) => acc + city.temp, 0)
+  return Math.round(sum / weatherList.value.length)
+})
+const hottestCity = computed(() =>
+  weatherList.value.length === 0
+    ? null
+    : weatherList.value.reduce((max, city) => (city.temp > max.temp ? city : max)),
+)
+const coldestCity = computed(() =>
+  weatherList.value.length === 0
+    ? null
+    : weatherList.value.reduce((min, city) => (city.temp < min.temp ? city : min)),
+)
+
 watch(selectedCityInfo, (newVal) => {
   console.log('[watch] 선택된 도시:', newVal)
 })
 
-watchEffect(() => {
-  console.log('[watchEffect] 검색어 변경:', searchQuery.value)
+watch(sortBy, (newVal) => {
+  console.log('[watch] 정렬 기준 변경:', newVal)
 })
 
-function handleUpdateQuery(value) {
-  searchQuery.value = value
-}
+watchEffect(() => {
+  console.log('[watchEffect] 검색어 변경:', searchStore.query)
+})
+
 function handleSelectCard(city) {
   selectedCityInfo.value = city
 }
@@ -68,11 +110,11 @@ function handleClickDetail(city) {
 
 <template>
   <div class="weather-parent">
-    <h2 class="weather-parent__title">날씨 대시보드 — Day 3 (Router · Pinia · Axios)</h2>
+    <h2 class="weather-parent__title"></h2>
 
     <BaseDashboardCard>
       <template #search>
-        <SearchBar :query="searchQuery" @update-query="handleUpdateQuery" />
+        <SearchBar :query="searchStore.query" @update-query="searchStore.setQuery" />
       </template>
       <template #list>
         <p v-if="isLoading" class="status-message">날씨 정보를 불러오는 중...</p>
@@ -81,14 +123,27 @@ function handleClickDetail(city) {
           <p v-if="selectedCityInfo" class="weather-parent__selected">
             선택된 도시: {{ selectedCityInfo.name }}
           </p>
-          <ul v-if="displayWeatherList.length > 0" class="city-list">
-            <WeatherCard
-              v-for="city in displayWeatherList"
-              :key="city.id"
-              :city="city"
-              @select-card="handleSelectCard"
-              @click-detail="handleClickDetail"
-            />
+
+          <div class="weather-parent__toolbar">
+            <label class="weather-parent__sort">
+              정렬
+              <select v-model="sortBy">
+                <option value="name">이름순</option>
+                <option value="temp">기온순</option>
+              </select>
+            </label>
+          </div>
+
+          <p v-if="averageTemp !== null" class="weather-parent__summary">
+            즐겨찾기 {{ favoriteCount }}개 · 검색 결과 {{ filteredCount }}개 · 평균 {{ averageTemp }}°
+            · 최고 {{ hottestCity?.name }}({{ hottestCity?.temp }}°) · 최저 {{ coldestCity?.name }}({{
+              coldestCity?.temp
+            }}°)
+          </p>
+
+          <ul v-if="sortedWeatherList.length > 0" class="city-list">
+            <WeatherCard v-for="city in sortedWeatherList" :key="city.id" :city="city" @select-card="handleSelectCard"
+              @click-detail="handleClickDetail" />
           </ul>
           <p v-else class="empty-state">검색 결과가 없습니다.</p>
         </template>
@@ -101,17 +156,52 @@ function handleClickDetail(city) {
 .weather-parent__title {
   max-width: 420px;
   margin: 0 auto 12px;
+  font-family: var(--font-mono);
   font-size: 15px;
   font-weight: 600;
-  color: #8a8f98;
+  color: var(--moss);
   letter-spacing: 0.2px;
 }
 
 .weather-parent__selected {
   margin: 0 0 12px;
+  font-family: var(--font-mono);
   font-size: 13px;
-  color: #6e97a6;
+  color: var(--moss);
   font-weight: 500;
+}
+
+.weather-parent__toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
+.weather-parent__sort {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--moss);
+}
+
+.weather-parent__sort select {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  border: 1px solid var(--moss);
+  border-radius: 6px;
+  padding: 2px 6px;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.weather-parent__summary {
+  margin: 0 0 16px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--moss);
+  line-height: 1.5;
 }
 
 .city-list {
@@ -126,12 +216,13 @@ function handleClickDetail(city) {
 .empty-state,
 .status-message {
   text-align: center;
-  color: #9ba1a8;
+  font-family: var(--font-mono);
+  color: var(--moss);
   font-size: 13px;
   margin-top: 24px;
 }
 
 .status-message--error {
-  color: #c97b4a;
+  color: var(--amber);
 }
 </style>

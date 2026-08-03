@@ -15,6 +15,11 @@ const router = createRouter({
       props: true,
     },
     {
+      path: '/map',
+      name: 'weather-map',
+      component: () => import('../views/WeatherMapView.vue'),
+    },
+    {
       path: '/practices',
       name: 'practices',
       component: () => import('../views/practices/PracticesIndexView.vue'),
@@ -38,6 +43,12 @@ const router = createRouter({
       path: '/practices/day4',
       name: 'practices-day4',
       component: () => import('../views/practices/PracticesDay4View.vue'),
+    },
+    {
+      // 디자인 컨셉 확인용 임시 페이지 (해/구름/비/눈 애니메이션 강제 비교)
+      path: '/preview/dot-matrix',
+      name: 'preview-dot-matrix',
+      component: () => import('../views/DotMatrixPreviewView.vue'),
     },
     {
       // Catch-all Route: 정의되지 않은 모든 경로 처리

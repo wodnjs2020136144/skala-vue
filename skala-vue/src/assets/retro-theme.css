@@ -1,0 +1,25 @@
+/*
+ * "Retro LED Weather Terminal" 디자인 토큰
+ * 옛날 도트 매트릭스/LED 전광판에서 영감을 받은 톤다운 팔레트 + 픽셀 타이포그래피.
+ */
+:root {
+  --paper: #edeae1;
+  --ink: #1c1b19;
+  --panel: #17181a;
+  --dot-off: #2a2c2e;
+  --dot-lit: #f3ebd9;
+  --amber: #c98a2c;
+  --moss: #5e6b5a;
+  --sea: #5c9ca8;
+
+  --font-pixel: 'Silkscreen', ui-monospace, monospace;
+  /* 한글 도트 폰트. 작은 텍스트(안내문/설명)에는 쓰지 않고, 큰 제목류에만 제한적으로 사용해 가독성을 지킨다. */
+  --font-pixel-kr: 'Galmuri11', var(--font-mono);
+  --font-mono: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-mono);
+}

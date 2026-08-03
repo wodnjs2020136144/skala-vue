@@ -1,4 +1,6 @@
 <script setup>
+import DotMatrixIcon from './DotMatrixIcon.vue'
+
 defineProps({
   city: {
     type: Object,
@@ -11,8 +13,11 @@ const emit = defineEmits(['select-card', 'click-detail'])
 
 <template>
   <li class="city-card" @click="emit('select-card', city)">
-    <div class="city-card__badge" :class="city.temp >= 25 ? 'is-warm' : 'is-cool'">
-      <FontAwesomeIcon :icon="city.temp >= 25 ? 'fire' : 'snowflake'" />
+    <div class="city-card__badge">
+      <!-- 카드 아이콘은 44px로 작아 애니메이션 디테일이 잘 안 보이는데, 홈 화면에 9장이 동시에
+           떠 있으면 각자 80ms마다 36x36 그리드를 다시 계산해 렉이 심해진다. 큰 화면(지도 팝업/
+           상세 페이지)에서만 animated=true로 켜고, 카드에서는 정적 1프레임만 그린다. -->
+      <DotMatrixIcon :condition="city.condition" size="sm" :animated="false" />
     </div>
     <div class="city-card__info">
       <p class="city-card__name">{{ city.name }}</p>
@@ -36,7 +41,7 @@ const emit = defineEmits(['select-card', 'click-detail'])
   display: flex;
   align-items: center;
   gap: 14px;
-  background: #ffffff;
+  background: var(--paper);
   border-radius: 16px;
   padding: 16px 18px;
   box-shadow: 0 1px 3px rgba(20, 20, 30, 0.05);
@@ -44,24 +49,7 @@ const emit = defineEmits(['select-card', 'click-detail'])
 }
 
 .city-card__badge {
-  width: 40px;
-  height: 40px;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 16px;
   flex-shrink: 0;
-}
-
-.city-card__badge.is-warm {
-  background: #f5e4db;
-  color: #c97b4a;
-}
-
-.city-card__badge.is-cool {
-  background: #e1eaee;
-  color: #6e97a6;
 }
 
 .city-card__info {
@@ -71,15 +59,17 @@ const emit = defineEmits(['select-card', 'click-detail'])
 
 .city-card__name {
   margin: 0;
+  font-family: var(--font-pixel-kr);
   font-size: 15px;
-  font-weight: 600;
-  color: #2e3238;
+  color: var(--ink);
+  letter-spacing: 0.05em;
 }
 
 .city-card__status {
   margin: 2px 0 0;
+  font-family: var(--font-mono);
   font-size: 13px;
-  color: #9ba1a8;
+  color: var(--moss);
 }
 
 .city-card__temp-block {
@@ -88,48 +78,48 @@ const emit = defineEmits(['select-card', 'click-detail'])
 
 .city-card__temp {
   margin: 0;
+  font-family: var(--font-pixel);
   font-size: 20px;
-  font-weight: 700;
-  color: #2e3238;
+  color: var(--ink);
   line-height: 1;
 }
 
 .city-card__unit {
   font-size: 13px;
-  font-weight: 500;
-  color: #9ba1a8;
+  color: var(--moss);
 }
 
 .city-card__label {
   display: inline-block;
   margin-top: 4px;
+  font-family: var(--font-mono);
   font-size: 11px;
   padding: 2px 8px;
   border-radius: 999px;
 }
 
 .city-card__label.is-warm {
-  background: #f5e4db;
-  color: #c97b4a;
+  background: rgba(201, 138, 44, 0.15);
+  color: var(--amber);
 }
 
 .city-card__label.is-cool {
-  background: #e1eaee;
-  color: #6e97a6;
+  background: rgba(94, 107, 90, 0.15);
+  color: var(--moss);
 }
 
 .city-card__detail-btn {
   border: none;
-  background: #f1f2f4;
-  color: #6b7076;
+  background: none;
+  color: var(--moss);
+  font-family: var(--font-pixel-kr);
   font-size: 12px;
   padding: 6px 10px;
-  border-radius: 999px;
   cursor: pointer;
   flex-shrink: 0;
 }
 
 .city-card__detail-btn:hover {
-  background: #e7e9ec;
+  color: var(--amber);
 }
 </style>

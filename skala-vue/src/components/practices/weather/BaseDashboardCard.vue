@@ -20,9 +20,9 @@
   max-width: 420px;
   margin: 0 auto;
   padding: 28px;
-  background: #f6f7f8;
+  background: var(--paper);
   border-radius: 20px;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Pretendard', sans-serif;
+  font-family: var(--font-mono);
 }
 
 .dashboard-card__list {

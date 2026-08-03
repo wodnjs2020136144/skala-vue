@@ -17,12 +17,7 @@ function handleInput(e) {
 <template>
   <div class="search-bar">
     <FontAwesomeIcon icon="magnifying-glass" class="search-bar__icon" />
-    <input
-      class="search-bar__input"
-      :value="query"
-      @input="handleInput"
-      placeholder="도시명을 검색하세요 (한글 입력 테스트)"
-    />
+    <input class="search-bar__input" :value="query" @input="handleInput" placeholder="도시명을 검색하세요" />
   </div>
 </template>
 
@@ -31,14 +26,18 @@ function handleInput(e) {
   display: flex;
   align-items: center;
   gap: 10px;
-  background: #ffffff;
+  background: var(--panel);
   border-radius: 999px;
   padding: 10px 16px;
-  box-shadow: 0 1px 2px rgba(20, 20, 30, 0.04);
+  border: 1px solid transparent;
+}
+
+.search-bar:focus-within {
+  border-color: var(--amber);
 }
 
 .search-bar__icon {
-  color: #b7bcc4;
+  color: var(--moss);
   font-size: 14px;
 }
 
@@ -46,12 +45,13 @@ function handleInput(e) {
   border: none;
   outline: none;
   flex: 1;
+  font-family: var(--font-mono);
   font-size: 14px;
-  color: #3a3f45;
+  color: var(--dot-lit);
   background: transparent;
 }
 
 .search-bar__input::placeholder {
-  color: #b7bcc4;
+  color: var(--moss);
 }
 </style>

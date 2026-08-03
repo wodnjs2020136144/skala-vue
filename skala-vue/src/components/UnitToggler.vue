@@ -12,17 +12,18 @@ const configStore = useConfigStore()
 
 <style scoped>
 .unit-toggler {
-  border: none;
-  background: #f1f2f4;
-  color: #3a3f45;
+  border: 1px solid var(--moss);
+  background: var(--panel);
+  color: var(--dot-lit);
+  font-family: var(--font-pixel-kr);
   font-size: 13px;
-  font-weight: 600;
   padding: 8px 14px;
   border-radius: 999px;
   cursor: pointer;
 }
 
 .unit-toggler:hover {
-  background: #e7e9ec;
+  border-color: var(--amber);
+  color: var(--amber);
 }
 </style>

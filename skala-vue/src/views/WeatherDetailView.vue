@@ -1,8 +1,11 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { ElSkeleton } from 'element-plus'
 import { useConfigStore } from '../stores/configStore'
 import { findCityById, fetchCurrentWeather } from '../services/weatherApi'
+import WeatherStatsPanel from '../components/practices/weather/WeatherStatsPanel.vue'
+import UnitToggler from '../components/UnitToggler.vue'
 
 const props = defineProps({
   id: {
@@ -45,24 +48,28 @@ watch(() => props.id, loadDetail)
 // 요구사항 스펙: Math.round((rawTemp * 9) / 5 + 32)
 const displayTemp = computed(() => {
   if (!weather.value) return null
-  return configStore.unit === 'imperial'
-    ? Math.round((weather.value.temp * 9) / 5 + 32)
-    : weather.value.temp
+  const { unit } = configStore
+  return unit === 'imperial' ? Math.round((weather.value.temp * 9) / 5 + 32) : weather.value.temp
 })
 </script>
 
 <template>
   <div class="weather-detail">
     <button class="weather-detail__back" @click="router.push({ name: 'weather-home' })">
-      ← 목록으로
+      ← BACK
     </button>
 
-    <p v-if="isLoading" class="status-message">날씨 정보를 불러오는 중...</p>
+    <ElSkeleton v-if="isLoading" :rows="4" animated />
     <p v-else-if="loadError" class="status-message status-message--error">{{ loadError }}</p>
+
     <div v-else class="weather-detail__card">
-      <h2 class="weather-detail__name">{{ weather.name }}</h2>
-      <p class="weather-detail__temp">{{ displayTemp }}{{ configStore.unitSymbol }}</p>
-      <p class="weather-detail__status">{{ weather.status }}</p>
+      <div class="weather-detail__head">
+        <p class="weather-detail__name">{{ weather.name }}</p>
+        <UnitToggler />
+      </div>
+      <p class="weather-detail__temp">{{ displayTemp }}<span>°{{ configStore.unitSymbol }}</span></p>
+
+      <WeatherStatsPanel :city="weather" />
     </div>
   </div>
 </template>
@@ -72,54 +79,64 @@ const displayTemp = computed(() => {
   max-width: 420px;
   margin: 0 auto;
   padding: 28px;
+  font-family: var(--font-mono);
 }
 
 .weather-detail__back {
   border: none;
   background: none;
-  color: #6e97a6;
-  font-size: 13px;
+  color: var(--moss);
+  font-family: var(--font-pixel);
+  font-size: 12px;
   cursor: pointer;
   padding: 0;
-  margin-bottom: 16px;
+  margin-bottom: 20px;
+  letter-spacing: 0.05em;
 }
 
 .weather-detail__card {
-  background: #ffffff;
-  border-radius: 16px;
-  padding: 28px;
+  background: var(--paper);
+  border-radius: 20px;
+  padding: 24px;
   text-align: center;
-  box-shadow: 0 1px 3px rgba(20, 20, 30, 0.05);
+}
+
+.weather-detail__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .weather-detail__name {
   margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: #2e3238;
+  /* 한글 도트 폰트는 큰 크기(제목)에만 사용해 가독성을 지킨다 */
+  font-family: var(--font-pixel-kr);
+  font-size: 20px;
+  font-weight: 400;
+  color: var(--ink);
+  letter-spacing: 0.08em;
 }
 
 .weather-detail__temp {
-  margin: 12px 0 0;
-  font-size: 40px;
-  font-weight: 700;
-  color: #2e3238;
+  margin: 8px 0 20px;
+  font-family: var(--font-pixel);
+  font-size: 56px;
+  line-height: 1;
+  color: var(--ink);
 }
 
-.weather-detail__status {
-  margin: 4px 0 0;
-  font-size: 14px;
-  color: #9ba1a8;
+.weather-detail__temp span {
+  font-size: 22px;
+  vertical-align: top;
 }
 
 .status-message {
   text-align: center;
-  color: #9ba1a8;
   font-size: 13px;
   margin-top: 24px;
 }
 
 .status-message--error {
-  color: #c97b4a;
+  color: var(--amber);
 }
 </style>
