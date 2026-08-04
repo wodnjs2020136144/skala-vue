@@ -1413,6 +1413,108 @@
 
 ---
 
+## 20. 게임 채점·연출 강화 + 순위표 + 도시 픽셀 어우러짐 + 바다 클릭 파동
+
+**요구사항**
+- (사용자가 직접 수정) `WeatherMapView.vue`에서 게임 설명 문구를 정리하고 헤더의 이모티콘을 제거 — 별도 커밋으로 반영.
+- 게임에서 오답이고 거리가 멀수록 비례해서 감점, 단 0점 밑으로는 내려가지 않는다.
+- 연속으로 맞히면(콤보) 한반도 전체가 한 번 빛나는 이펙트.
+- 시간이 다 되면(게임 종료) 한반도 픽셀 전체가 들썩이는 이펙트.
+- 한 문제에서 5초 동안 못 맞히면 정답 근처 픽셀이 살짝 빛나는 힌트.
+- 게임이 끝나면 순위 top10을 표기.
+- 주요 지역(도시) 픽셀이 다른 지형 픽셀과 자연스럽게 어우러지게(지금처럼 별도 레이어에 떠 있는 것처럼 보이지 않게).
+- 바다 픽셀을 클릭하면 그 위치를 기준으로 파도가 일렁이는 이펙트.
+- 이상 전체 커밋 및 푸시.
+
+**사고 과정**
+- 사용자가 직접 편집한 diff를 먼저 확인해보니 실제 내용 변경(이모티콘 제거, 문구 축약)과 별개로 에디터의 자동 포맷터가 전체 파일의 줄바꿈 스타일을 바꿔놓았다. 이 변경은 사용자 소유이므로 되돌리지 않고 그대로 첫 커밋으로 반영한 뒤, 그 위에 이번 작업을 이어서 얹었다.
+- 감점 로직은 "거리에 비례"라는 요구사항을 그대로 `Math.round(distance * PENALTY_PER_CELL)`로 구현하고, `Math.max(0, score - penalty)`로 0점 하한을 걸었다. 정답 시 점수 계산식(거리 0이면 만점, TOLERANCE에서 0점)과 대칭을 이루도록 오답 감점도 "거리에 선형 비례"로 통일했다.
+- 콤보 이펙트("연속으로 맞추면")는 문자 그대로 "연속"이 최소 2번 이상 이어진 경우를 뜻한다고 판단해, `combo.value >= 2`일 때(이번 정답이 이전 정답에 이어진 두 번째 이상)만 트리거하도록 했다. 매번 정답마다 트리거하면 "연속"의 의미가 사라지기 때문이다.
+- 게임 종료 이펙트와 콤보 이펙트 모두 "한반도 전체"에 적용해야 해서, 개별 도트마다 Vue 반응형을 거치는 대신(수천 개 도트가 매번 다시 diff되어 렉의 원인이 됐던 경험이 있어서) 기존 burst/파동과 같은 패턴 — 클래스 토글 + CSS `@keyframes` — 을 재사용했다. 다만 이 두 이펙트는 `filter`/`transform`을 애니메이션하는데, 기존 파동/프레스/burst도 같은 속성을 CSS 커스텀 프로퍼티로 제어하고 있어 이론상 짧은 순간 시각적으로 겹칠 수 있다 — 하지만 게임 중에는 파동/프레스가 이미 꺼져 있고(직전 라운드 최적화), burst는 찰나(0.48초)뿐이라 실제로 부딪힐 확률은 낮고, 설령 겹쳐도 둘 다 "긍정적 반짝임" 계열이라 위화감이 적다고 판단해 그대로 진행했다.
+- 힌트 기능은 "라운드 시작 후 5초"라는 조건이 게임 전체 타이머(30초)와는 별개의, 라운드 단위 타이머라는 걸 명확히 했다 — `useRegionGame`에 `scheduleHint(region)`을 추가해 매 라운드 시작마다 새로 예약하고, 5초 뒤 콜백이 실행될 때 "그 사이에 이미 답을 했거나 게임이 끝나지 않았는지"(`status.value === 'playing' && currentRegion.value === region`)를 확인해 레이스 컨디션을 막았다.
+- 순위 top10은 기존 "최고 기록 1개만 저장"하던 localStorage 구조를 배열로 바꿨다. `bestScore`는 그대로 유지하되 `leaderboard.value[0]`을 참조하는 `computed`로 바꿔 기존 대기 화면("최고 기록: N점")과 하위 호환을 지켰다.
+- 주요 지역(도시) 픽셀이 "떠 있는 것처럼" 보이는 원인을 CSS 쌓임 순서(stacking)에서 찾았다 — `.is-city`에 항상 걸려 있던 `position:relative; z-index:1`이, 인접한 육지/바다 도트들의 자연스러운 DOM 순서 기반 겹침(육지·바다가 서로 이어붙어 보이게 만드는 핵심 기법)을 깨고 도시 도트의 테두리를 항상 이웃 위로 그리게 만들고 있었다. 평상시(호버·선택 아님)에는 z-index를 아예 주지 않고, 실제로 도드라져야 하는 `:hover`·`.is-selected`에서만 국소적으로 `position:relative`를 주는 방식으로 바꿨다.
+- 바다 클릭 파동은 이미 마우스 이동 시 쓰던 `spawnRipple`을 그대로 재사용하면 됐다 — 새 이펙트를 만들 필요 없이, 게임이 아닐 때 클릭한 도트가 바다(비육지)이면 그 자리에 파동을 하나 등록하도록 클릭 핸들러만 확장했다.
+
+**해결 과정**
+1. `src/composables/useRegionGame.js`에 거리 비례 감점, 0점 하한, top10 리더보드, 라운드별 힌트 타이머를 추가했다.
+
+   #### `src/composables/useRegionGame.js`
+   ```js
+   const PENALTY_PER_CELL = 8
+   // ...
+   } else {
+     combo.value = 0
+     penalty = Math.round(distance * PENALTY_PER_CELL)
+     score.value = Math.max(0, score.value - penalty)
+   }
+   // ...
+   function scheduleHint(region) {
+     clearHintTimer()
+     hintRegion.value = null
+     hintTimerId = setTimeout(() => {
+       if (status.value === 'playing' && currentRegion.value === region) {
+         hintRegion.value = region
+       }
+     }, HINT_DELAY_MS)
+   }
+   function finishGame() {
+     // ...
+     const updated = [...leaderboard.value, score.value].sort((a, b) => b - a).slice(0, LEADERBOARD_SIZE)
+     leaderboard.value = updated
+     localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(updated))
+   }
+   ```
+2. `src/components/practices/weather/KoreaMapDots.vue`에 콤보 플래시(`flashKorea`)·게임오버 흔들림(`shakeKorea`)·힌트(`showHint`/`clearHint`)를 추가하고 `defineExpose`에 노출했다. 게임 종료 흔들림은 육지 도트마다 무작위 지연(`--shake-delay`)을 부여해 기계적으로 보이지 않게 했다.
+
+   #### `src/components/practices/weather/KoreaMapDots.vue`
+   ```js
+   function shakeKorea() {
+     for (const dot of dots.value) {
+       if (!dot.isLand) continue
+       const el = dotElements[dot.index]
+       if (el) el.style.setProperty('--shake-delay', `${(Math.random() * 0.4).toFixed(2)}s`)
+     }
+     isGameOverShaking.value = true
+     // ...1.5초 뒤 해제
+   }
+   ```
+   ```css
+   .korea-map.is-game-over-shaking .korea-map__dot.is-land {
+     animation: korea-game-over-shake 1.2s ease-in-out;
+     animation-delay: var(--shake-delay, 0s);
+   }
+   ```
+3. 같은 파일에서 도시 픽셀의 `position:relative; z-index:1`을 평상시 규칙에서 제거하고 `:hover`/`.is-selected`에만 국소적으로 부여했다.
+4. `handleDotClick`에 "게임 중이 아니고, 도시도 아니고, 육지도 아니면(=바다) 그 자리에 파동을 등록" 분기를 추가했다.
+
+   ```js
+   function handleDotClick(dot, event) {
+     if (props.gameActive) { emit('map-pick', { col: dot.col, row: dot.row }); return }
+     if (dot.city) { handleCityDotClick(dot, event) }
+     else if (!dot.isLand) { spawnRipple(dot.col, dot.row); ensureTicking() }
+   }
+   ```
+5. `src/views/WeatherMapView.vue`에서 `handleMapPick`이 콤보 조건을 확인해 `flashKorea()`를 호출하도록 하고, `game.status`가 `'finished'`로 바뀌는 순간 `shakeKorea()`를 호출하는 watcher, `game.hintRegion`이 채워지고 비워질 때마다 `showHint`/`clearHint`를 호출하는 watcher를 추가했다. 게임 종료 화면을 "최고 기록 1줄"에서 top10 순위 목록으로 교체했다.
+6. `npx vite build`로 컴파일 오류 없음을 확인하고, 개발 서버로 수정 파일 3개가 정상 서빙됨을 확인했다. Node.js로 감점 공식(거리별 감점액)과 0점 하한이 의도대로 동작하는지 수치로 검증했다.
+
+**트러블슈팅**
+- 문제: 사용자가 직접 수정한 `WeatherMapView.vue`를 그대로 커밋하려 했을 때, 실제 내용 변경과 에디터 자동 포맷팅이 섞여 있어 diff가 커 보였다.
+- 해결: 되돌리지 않고 사용자의 수정 그대로(포맷팅 포함) 첫 커밋으로 분리해 반영한 뒤, 그 위에 새 작업을 이어갔다 — "사용자가 의도적으로 만든 변경은 되돌리지 않는다"는 원칙을 지켰다.
+- 문제: 이번에도 Chrome 브라우저 자동화 확장이 연결되지 않아 콤보 플래시, 게임오버 흔들림, 힌트 깜빡임, 도시 픽셀 어우러짐, 바다 클릭 파동을 실제 화면에서 확인하지 못했다.
+- 해결: 빌드 통과, 개발 서버 서빙 확인, 감점 공식 수치 검증까지만 내가 확인할 수 있는 범위였다. 실제 시각 효과 확인은 사용자에게 요청했다.
+
+**결과**
+- 빌드 통과, 수정한 파일 3개 모두 정상 컴파일·서빙됨을 확인했다.
+- 감점 공식이 거리에 선형 비례하고 0점 밑으로 내려가지 않음을 Node.js로 확인했다.
+- (브라우저 자동화 도구 연결 불가로 실제 화면 확인은 사용자 몫으로 남음) 코드상으로는 콤보 시 한반도 전체 플래시, 게임 종료 시 들썩임, 무응답 5초 후 힌트, top10 순위표, 평상시 도시 픽셀이 지형과 자연스럽게 이어지는 모습, 바다 클릭 시 파동이 모두 구현됐다.
+
+**느낀점**
+- "한반도 전체가 빛난다/들썩인다"처럼 수천 개 도트에 영향을 주는 이펙트도, 개별 도트를 순회하며 JS로 애니메이션하는 대신 CSS 클래스 토글 + `@keyframes`로 넘기면 브라우저 렌더링 엔진이 처리해줘서 코드도 짧고 성능도 낫다는 걸 다시 확인했다. 다만 이미 같은 속성(`filter`/`transform`)을 여러 이펙트가 공유하고 있어서, 새 이펙트를 추가할 때마다 "기존 이펙트와 같은 순간에 겹치면 어떻게 보일지"를 미리 따져보는 습관이 점점 더 중요해지고 있다.
+- CSS 쌓임 순서(stacking context) 문제는 "왜 이게 떠 있는 것처럼 보이지?"라는 질문에 대해 색상이나 그림자보다 z-index/position 쪽을 먼저 의심해봐야 한다는 걸 이번에 배웠다 — 시각적으로 "레이어가 분리된 느낌"은 색보다 쌓임 순서(어떤 요소가 이웃 위로 그려지는지)에서 오는 경우가 많다.
+
+---
+
 <!--
 아래 형식을 복사해서 작업 단위마다 항목을 추가합니다.
 

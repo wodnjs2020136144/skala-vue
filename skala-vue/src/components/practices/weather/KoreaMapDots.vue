@@ -651,6 +651,8 @@ onUnmounted(() => {
   resizeObserver?.disconnect()
   rootRef.value?.removeEventListener('wheel', handleWheel)
   if (rafId) cancelAnimationFrame(rafId)
+  clearTimeout(comboFlashTimeoutId)
+  clearTimeout(shakeTimeoutId)
 })
 
 function handleCityDotClick(dot, event) {
@@ -659,14 +661,19 @@ function handleCityDotClick(dot, event) {
 }
 
 // 게임 진행 중에는 도시 여부와 무관하게 모든 칸 클릭이 map-pick으로 나가고, 날씨 팝업은
-// 뜨지 않는다(게임 중 팝업이 뜨면 방해된다). 게임이 꺼져 있을 때는 기존처럼 도시 도트만
-// select-city를 낸다.
+// 뜨지 않는다(게임 중 팝업이 뜨면 방해된다). 게임이 꺼져 있을 때는 기존처럼 도시 도트는
+// 팝업을 열고, 바다 도트는 그 자리에서 파동이 일렁이는 이펙트를 낸다.
 function handleDotClick(dot, event) {
   if (props.gameActive) {
     emit('map-pick', { col: dot.col, row: dot.row })
     return
   }
-  if (dot.city) handleCityDotClick(dot, event)
+  if (dot.city) {
+    handleCityDotClick(dot, event)
+  } else if (!dot.isLand) {
+    spawnRipple(dot.col, dot.row)
+    ensureTicking()
+  }
 }
 
 // city.mapX/mapY(0~1 상대 좌표) → 실제 그리드 칸(col,row). buildGrid가 도시 배치에 쓰는
@@ -678,7 +685,67 @@ function mapToColRow(mapX, mapY) {
   return { col: koreaOffsetCol + localCol, row: koreaOffsetRow + localRow }
 }
 
-defineExpose({ spawnBurst, mapToColRow })
+// --- 콤보 이펙트: 연속으로 맞히면 한반도 전체가 한 번 빛난다 ---
+const isComboFlashing = ref(false)
+let comboFlashTimeoutId = null
+function flashKorea() {
+  isComboFlashing.value = true
+  clearTimeout(comboFlashTimeoutId)
+  comboFlashTimeoutId = setTimeout(() => {
+    isComboFlashing.value = false
+  }, 650)
+}
+
+// --- 게임 종료 이펙트: 한반도 전체가 들썩인다 ---
+const isGameOverShaking = ref(false)
+let shakeTimeoutId = null
+function shakeKorea() {
+  // 칸마다 살짝 다른 타이밍으로 흔들리도록 매번 무작위 지연을 다시 부여한다 — 전부 똑같이
+  // 움직이면 "들썩인다"는 느낌보다 기계적인 느낌이 난다.
+  for (const dot of dots.value) {
+    if (!dot.isLand) continue
+    const el = dotElements[dot.index]
+    if (el) el.style.setProperty('--shake-delay', `${(Math.random() * 0.4).toFixed(2)}s`)
+  }
+  isGameOverShaking.value = true
+  clearTimeout(shakeTimeoutId)
+  shakeTimeoutId = setTimeout(() => {
+    isGameOverShaking.value = false
+  }, 1500)
+}
+
+// --- 힌트: 라운드 시작 후 일정 시간 못 맞히면 정답 근처 픽셀이 은은하게 깜빡인다 ---
+const HINT_RADIUS = 3
+let hintedIndices = []
+function clearHint() {
+  for (const idx of hintedIndices) {
+    dotElements[idx]?.classList.remove('is-hint')
+  }
+  hintedIndices = []
+}
+function showHint(col, row) {
+  clearHint()
+  const radiusSq = HINT_RADIUS * HINT_RADIUS
+  const minCol = Math.max(0, Math.floor(col - HINT_RADIUS))
+  const maxCol = Math.min(cols.value - 1, Math.ceil(col + HINT_RADIUS))
+  const minRow = Math.max(0, Math.floor(row - HINT_RADIUS))
+  const maxRow = Math.min(rows.value - 1, Math.ceil(row + HINT_RADIUS))
+  for (let r = minRow; r <= maxRow; r++) {
+    for (let c = minCol; c <= maxCol; c++) {
+      const dr = r - row
+      const dc = c - col
+      if (dr * dr + dc * dc > radiusSq) continue
+      const idx = r * cols.value + c
+      const el = dotElements[idx]
+      if (el) {
+        el.classList.add('is-hint')
+        hintedIndices.push(idx)
+      }
+    }
+  }
+}
+
+defineExpose({ spawnBurst, mapToColRow, flashKorea, shakeKorea, showHint, clearHint })
 
 function handleCityHover(dot, event) {
   hoveredDot.value = dot
@@ -696,7 +763,11 @@ function handleCityHover(dot, event) {
   <div
     ref="rootRef"
     class="korea-map"
-    :class="{ 'is-game-active': gameActive }"
+    :class="{
+      'is-game-active': gameActive,
+      'is-combo-flashing': isComboFlashing,
+      'is-game-over-shaking': isGameOverShaking,
+    }"
     @mousemove="handleMouseMove"
     @mouseleave="handleMouseLeave"
   >
@@ -804,8 +875,10 @@ function handleCityHover(dot, event) {
 }
 
 .korea-map__dot.is-city {
-  position: relative;
-  z-index: 1;
+  /* 평소엔 z-index를 두지 않는다 — 주변 육지·바다 도트와 같은 자연스러운 쌓임 순서(DOM 순서)를
+     따라야 서로의 box-shadow가 이어붙는 "꽉 찬 영역" 느낌이 유지된다. is-city만 z-index로
+     들떠 있으면 주변 도트들이 그 테두리를 덮지 못해 마치 다른 레이어에 붙어있는 스티커처럼
+     보인다 — 호버·선택처럼 실제로 도드라져야 할 때만 아래에서 position/z-index를 준다. */
   cursor: pointer;
   transition: transform 0.15s ease;
   /* 육지·바다처럼 도시도 꽉 찬 느낌을 내되, 자기 색 그대로면 배경과 구분이 안 돼 마커색을
@@ -815,14 +888,18 @@ function handleCityHover(dot, event) {
   box-shadow: 0 0 0 2px var(--marker-border-color, var(--amber));
 }
 
-/* 평상시엔 주변 지형 도트와 완전히 같은 크기 — 확대·글로우·펄스는 호버했을 때만 나타난다. */
+/* 평상시엔 주변 지형 도트와 완전히 같은 크기 — 확대·글로우·펄스는 호버했을 때만 나타난다.
+   이때만 position/z-index를 줘서 이웃 도트 위로 자연스럽게 튀어나오게 한다. */
 .korea-map__dot.is-city:hover {
-  transform: scale(1.9);
+  position: relative;
   z-index: 5;
+  transform: scale(1.9);
   box-shadow: 0 0 0 3px var(--pulse-color, var(--amber));
 }
 
 .korea-map__dot.is-city.is-selected {
+  position: relative;
+  z-index: 2;
   box-shadow: 0 0 0 2px var(--amber);
 }
 
@@ -930,6 +1007,61 @@ function handleCityHover(dot, event) {
   }
 }
 
+/* 콤보 이펙트 — 연속 정답 시 한반도 육지 전체가 한 번 밝게 빛난다. */
+.korea-map.is-combo-flashing .korea-map__dot.is-land {
+  animation: korea-combo-flash 0.6s ease-out;
+}
+
+@keyframes korea-combo-flash {
+  0% {
+    filter: brightness(1);
+  }
+  35% {
+    filter: brightness(2);
+  }
+  100% {
+    filter: brightness(1);
+  }
+}
+
+/* 게임 종료 이펙트 — 한반도 육지 전체가 살짝 들썩인다. 칸마다 다른 --shake-delay(JS가
+   매번 무작위로 부여)를 둬서 전부 똑같이 움직이지 않고 물결치듯 어긋나 보이게 한다. */
+.korea-map.is-game-over-shaking .korea-map__dot.is-land {
+  animation: korea-game-over-shake 1.2s ease-in-out;
+  animation-delay: var(--shake-delay, 0s);
+}
+
+@keyframes korea-game-over-shake {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  25% {
+    transform: translateY(-3px) scale(1.05);
+  }
+  50% {
+    transform: translateY(1px) scale(0.97);
+  }
+  75% {
+    transform: translateY(-1px) scale(1.02);
+  }
+}
+
+/* 힌트 — 5초 안에 못 맞히면 정답 근처 픽셀이 은은하게 깜빡인다. */
+.korea-map__dot.is-hint {
+  animation: korea-hint-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes korea-hint-pulse {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.6);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .korea-map__dot.is-city::after,
   .korea-map__dot.is-condition-rain::before {
@@ -938,7 +1070,9 @@ function handleCityHover(dot, event) {
   }
 
   .korea-map__dot,
-  .korea-map__dot.is-land {
+  .korea-map__dot.is-land,
+  .korea-map__dot.is-hint {
+    animation: none !important;
     transform: none !important;
     filter: none !important;
   }

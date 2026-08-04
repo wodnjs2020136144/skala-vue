@@ -199,15 +199,40 @@ function startGame() {
 
 // 게임이 진행 중일 때만 지도가 클릭을 map-pick으로 보낸다(KoreaMapDots의 gameActive prop).
 // 정답 위치에는 항상(기존 크림색 burst), 오답이면 클릭한 위치에도 빨간 burst를 추가로 띄워
-// "여기가 틀렸다"를 바로 알 수 있게 한다.
+// "여기가 틀렸다"를 바로 알 수 있게 한다. 콤보가 2 이상으로 이어지면(연속 정답) 한반도
+// 전체가 한 번 빛나는 이펙트를 함께 띄운다.
 function handleMapPick({ col, row }) {
   const result = game.submitGuess(col, row, (mapX, mapY) => mapDotsRef.value?.mapToColRow(mapX, mapY))
   if (!result) return
   mapDotsRef.value?.spawnBurst(result.answer.col, result.answer.row, 'correct')
-  if (!result.correct) {
+  if (result.correct) {
+    if (game.combo.value >= 2) mapDotsRef.value?.flashKorea()
+  } else {
     mapDotsRef.value?.spawnBurst(result.clicked.col, result.clicked.row, 'wrong')
   }
 }
+
+// 게임이 끝나는 순간(시간 종료든 문제를 다 풀었든) 한반도 전체가 들썩이는 이펙트를 띄운다.
+watch(
+  () => game.status.value,
+  (status) => {
+    if (status === 'finished') mapDotsRef.value?.shakeKorea()
+  },
+)
+
+// 라운드 시작 후 일정 시간 답을 못 맞히면 game.hintRegion이 채워진다 — 그 위치 근처를
+// 지도에서 은은하게 깜빡이게 하고, 다음 라운드로 넘어가 다시 null이 되면 지운다.
+watch(
+  () => game.hintRegion.value,
+  (region) => {
+    if (!region) {
+      mapDotsRef.value?.clearHint()
+      return
+    }
+    const pos = mapDotsRef.value?.mapToColRow(region.mapX, region.mapY)
+    if (pos) mapDotsRef.value?.showHint(pos.col, pos.row)
+  },
+)
 
 const formattedTimeLeft = computed(() => {
   const total = Math.max(0, game.timeLeft.value)
@@ -311,7 +336,7 @@ const mascotCondition = computed(() => {
                   game.lastResult.value.correct
                     ? `정답! +${game.lastResult.value.points}`
                     : `아쉬워요! 정답은 ${game.lastResult.value.region.name} · 클릭한 곳: ${game.lastResult.value.clickedRegionName ??
-                    '바다 근처'}`
+                    '바다 근처'} · -${game.lastResult.value.penalty}`
                 }}
               </p>
             </template>
@@ -319,10 +344,12 @@ const mascotCondition = computed(() => {
             <template v-else-if="game.status.value === 'finished'">
               <DotMatrixIcon condition="sun" size="sm" :animated="true" />
               <p class="game-window__result">최종 점수 {{ game.score.value }}점</p>
-              <p class="game-window__best">
-                최고 기록 {{ game.bestScore.value }}점
-                <span v-if="game.score.value > 0 && game.score.value === game.bestScore.value"> — 신기록!</span>
-              </p>
+              <ol class="game-window__leaderboard">
+                <li v-for="(entry, index) in game.leaderboard.value" :key="index"
+                  :class="{ 'is-current': entry === game.score.value }">
+                  {{ index + 1 }}위 · {{ entry }}점
+                </li>
+              </ol>
               <button class="game-window__start-btn" @pointerdown.stop @click="startGame">다시 하기</button>
             </template>
           </div>
@@ -565,6 +592,33 @@ const mascotCondition = computed(() => {
   font-family: var(--font-pixel-kr);
   font-size: 16px;
   color: var(--ink);
+}
+
+.game-window__leaderboard {
+  width: 100%;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.game-window__leaderboard li {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--moss);
+  text-align: left;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+
+.game-window__leaderboard li.is-current {
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--ink);
+  font-weight: 600;
 }
 
 /* 좁은 화면에서는 지도가 눌리지 않도록 정보창·게임창을 숨긴다 */
