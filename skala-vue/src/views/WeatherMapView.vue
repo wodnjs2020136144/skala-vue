@@ -232,22 +232,13 @@ const mascotCondition = computed(() => {
     <template v-else>
       <div class="weather-map__body">
         <div class="weather-map__grid-area">
-          <KoreaMapDots
-            ref="mapDotsRef"
-            :cities="cityList"
-            :selected-id="selectedId"
-            :game-active="game.status.value === 'playing'"
-            @select-city="selectCity"
-            @map-pick="handleMapPick"
-          />
+          <KoreaMapDots ref="mapDotsRef" :cities="cityList" :selected-id="selectedId"
+            :game-active="game.status.value === 'playing'" @select-city="selectCity" @map-pick="handleMapPick" />
         </div>
 
         <!-- 정보창: 즐겨찾기 + 오늘의 순위를 한 창에 통합. 드래그하려면 헤더를 잡고 끈다. -->
-        <div
-          class="map-window map-window--info"
-          data-draggable-window
-          :style="{ left: `${infoWindowDrag.position.value.x}px`, top: `${infoWindowDrag.position.value.y}px` }"
-        >
+        <div class="map-window map-window--info" data-draggable-window
+          :style="{ left: `${infoWindowDrag.position.value.x}px`, top: `${infoWindowDrag.position.value.y}px` }">
           <div class="map-window__header" @pointerdown="infoWindowDrag.startDrag">
             <FavoriteHeartDots :active="true" :size="14" />
             <span>즐겨찾기 · 오늘의 순위</span>
@@ -255,12 +246,8 @@ const mascotCondition = computed(() => {
           <div class="map-window__body">
             <section class="map-window__section">
               <h3 class="map-window__section-title">즐겨찾기</h3>
-              <button
-                v-for="city in favoriteCitiesWithWeather"
-                :key="city.id"
-                class="map-window__item"
-                @click="selectCityById(city)"
-              >
+              <button v-for="city in favoriteCitiesWithWeather" :key="city.id" class="map-window__item"
+                @click="selectCityById(city)">
                 <DotMatrixIcon :condition="city.condition" size="sm" :animated="false" />
                 <span class="map-window__item-name">{{ city.name }}</span>
                 <span class="map-window__item-temp">{{ convertTemp(city.temp) }}°</span>
@@ -275,12 +262,8 @@ const mascotCondition = computed(() => {
               <p class="map-window__subtitle">
                 <PixelTempIcon variant="hot" :size="14" /> 가장 더운 지역
               </p>
-              <button
-                v-for="(city, index) in hottestThree"
-                :key="city.id"
-                class="map-window__item"
-                @click="selectCityById(city)"
-              >
+              <button v-for="(city, index) in hottestThree" :key="city.id" class="map-window__item"
+                @click="selectCityById(city)">
                 <span class="map-window__rank">{{ index + 1 }}</span>
                 <span class="map-window__item-name">{{ city.name }}</span>
                 <span class="map-window__item-temp">{{ convertTemp(city.temp) }}°</span>
@@ -288,12 +271,8 @@ const mascotCondition = computed(() => {
               <p class="map-window__subtitle">
                 <PixelTempIcon variant="cold" :size="14" /> 가장 추운 지역
               </p>
-              <button
-                v-for="(city, index) in coldestThree"
-                :key="city.id"
-                class="map-window__item"
-                @click="selectCityById(city)"
-              >
+              <button v-for="(city, index) in coldestThree" :key="city.id" class="map-window__item"
+                @click="selectCityById(city)">
                 <span class="map-window__rank">{{ index + 1 }}</span>
                 <span class="map-window__item-name">{{ city.name }}</span>
                 <span class="map-window__item-temp">{{ convertTemp(city.temp) }}°</span>
@@ -303,18 +282,15 @@ const mascotCondition = computed(() => {
         </div>
 
         <!-- 게임창: 한반도 지역 찾기. 게임 시작을 누르면 지도 자체가 게임판이 된다. -->
-        <div
-          class="map-window map-window--game"
-          data-draggable-window
-          :style="{ left: `${gameWindowDrag.position.value.x}px`, top: `${gameWindowDrag.position.value.y}px` }"
-        >
+        <div class="map-window map-window--game" data-draggable-window
+          :style="{ left: `${gameWindowDrag.position.value.x}px`, top: `${gameWindowDrag.position.value.y}px` }">
           <div class="map-window__header" @pointerdown="gameWindowDrag.startDrag">
-            <span>🎮 한반도 지역 찾기</span>
+            <span>한반도 지역 찾기</span>
           </div>
           <div class="map-window__body map-window__body--game">
             <template v-if="game.status.value === 'idle'">
               <p class="game-window__desc">
-                지도에서 문제로 나온 지역을 클릭해서 맞혀보세요! 5문제, 제한시간 60초.
+                지도에서 문제로 나온 지역을 클릭해서 맞혀보세요! (10문제 30초)
               </p>
               <p class="game-window__best">최고 기록: {{ game.bestScore.value }}점</p>
               <button class="game-window__start-btn" @pointerdown.stop @click="startGame">게임 시작</button>
@@ -323,23 +299,19 @@ const mascotCondition = computed(() => {
             <template v-else-if="game.status.value === 'playing'">
               <DotMatrixIcon :condition="mascotCondition" size="sm" :animated="true" />
               <p class="game-window__prompt">찾아라! <strong>{{ game.currentRegion.value?.name }}</strong></p>
-              <DotStatBar
-                label="남은 시간"
-                :value="(game.timeLeft.value / game.timeLimit) * 100"
-                :display-value="formattedTimeLeft"
-              />
+              <DotStatBar label="남은 시간" :value="(game.timeLeft.value / game.timeLimit) * 100"
+                :display-value="formattedTimeLeft" />
               <p class="game-window__stats">
-                점수 {{ game.score.value }} · {{ game.roundIndex.value + 1 }}/{{ game.totalRounds }} · 콤보 {{ game.combo.value }}
+                점수 {{ game.score.value }} · {{ game.roundIndex.value + 1 }}/{{ game.totalRounds }} · 콤보 {{
+                  game.combo.value }}
               </p>
-              <p
-                v-if="game.lastResult.value"
-                class="game-window__feedback"
-                :class="{ 'is-correct': game.lastResult.value.correct }"
-              >
+              <p v-if="game.lastResult.value" class="game-window__feedback"
+                :class="{ 'is-correct': game.lastResult.value.correct }">
                 {{
                   game.lastResult.value.correct
                     ? `정답! +${game.lastResult.value.points}`
-                    : `아쉬워요! 정답은 ${game.lastResult.value.region.name} · 클릭한 곳: ${game.lastResult.value.clickedRegionName ?? '바다 근처'}`
+                    : `아쉬워요! 정답은 ${game.lastResult.value.region.name} · 클릭한 곳: ${game.lastResult.value.clickedRegionName ??
+                    '바다 근처'}`
                 }}
               </p>
             </template>
@@ -359,26 +331,17 @@ const mascotCondition = computed(() => {
 
       <Transition name="popup">
         <div v-if="selectedCity" class="popup-backdrop" @click="closePopup">
-          <div
-            ref="popupRef"
-            class="weather-popup"
-            data-draggable-window
-            :style="{
-              left: `${popupDrag.position.value.x}px`,
-              top: `${popupDrag.position.value.y}px`,
-              '--fit-scale': popupFitScale,
-            }"
-            @click.stop
-          >
+          <div ref="popupRef" class="weather-popup" data-draggable-window :style="{
+            left: `${popupDrag.position.value.x}px`,
+            top: `${popupDrag.position.value.y}px`,
+            '--fit-scale': popupFitScale,
+          }" @click.stop>
             <div class="weather-popup__inner">
               <div class="weather-popup__head" @pointerdown="popupDrag.startDrag">
                 <p class="weather-popup__name">{{ selectedCity.name }}</p>
                 <div class="weather-popup__head-actions" @pointerdown.stop>
                   <UnitToggler />
-                  <button
-                    class="weather-popup__fav-btn"
-                    @click="favoritesStore.toggleFavorite(selectedCity.id)"
-                  >
+                  <button class="weather-popup__fav-btn" @click="favoritesStore.toggleFavorite(selectedCity.id)">
                     <FavoriteHeartDots :active="favoritesStore.isFavorite(selectedCity.id)" :size="20" />
                   </button>
                   <button class="weather-popup__close-btn" @click="closePopup">✕</button>
@@ -464,7 +427,7 @@ const mascotCondition = computed(() => {
   gap: 4px;
 }
 
-.map-window__section + .map-window__section {
+.map-window__section+.map-window__section {
   margin-top: 12px;
 }
 
@@ -612,9 +575,12 @@ const mascotCondition = computed(() => {
 }
 
 @keyframes sea-shimmer {
-  0%, 100% {
+
+  0%,
+  100% {
     filter: brightness(1) saturate(1);
   }
+
   50% {
     filter: brightness(1.05) saturate(1.08);
   }
