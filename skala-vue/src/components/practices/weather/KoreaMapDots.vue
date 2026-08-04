@@ -68,8 +68,14 @@ const KOREA_MATRIX = [
   '0000011100000000000000',
 ]
 
-// 도트 한 칸의 픽셀 크기 — 육지·바다 전체 그리드가 이 값 하나로 통일된다.
-const DOT_PX = 14
+// 그리드 칸 수를 고정한다("한반도 매트릭스 + 약간의 바다 여백"). 예전에는 화면 픽셀
+// 크기를 고정 도트 크기(DOT_PX)로 나눠 칸 수를 정했는데, 그러면 화면이 넓을수록(=화면을
+// 꽉 채우는 바다까지 전부 도트로 그리면) 칸 수가 수천 개까지 늘어나 성능에 부담이었다.
+// 칸 수를 상수로 고정하면 화면 크기와 무관하게 항상 같은 개수만 그리고, 실제 픽셀 크기는
+// CSS(.korea-map__stage의 aspect-ratio)가 알아서 정한다.
+const MAP_MARGIN_CELLS = 3 // 한반도 매트릭스 바깥으로 "약간의 바다"를 몇 칸 더 보여줄지
+const BASE_GRID_W = GRID_W + MAP_MARGIN_CELLS * 2
+const BASE_GRID_H = GRID_H + MAP_MARGIN_CELLS * 2
 
 // 날씨 조건별 마커 색상.
 const CONDITION_COLORS = {
@@ -146,15 +152,18 @@ let landMask = new Uint8Array(0)
 let frameScratch = new Float32Array(0)
 // burst(선택 폭발) 전용 버퍼 — 파동/프레스와 달리 육지·바다 구분 없이 모든 칸에 적용된다.
 let burstScratch = new Float32Array(0)
+// burstScratch와 나란히, 각 칸에서 현재 가장 강한 burst가 정답(correct)인지 오답(wrong)인지
+// 기록한다 — 오답 burst만 빨간색(--burst-color)으로 표시하기 위함이다.
+let burstVariant = []
 // 한반도 매트릭스가 그리드 안에서 그려지는 오프셋 — 컨테이너 크기에 따라 buildGrid에서
 // 갱신된다. 게임 모드의 mapToColRow가 이 값을 그대로 재사용해, 화면 크기가 달라져도
 // city.mapX/mapY → 실제 칸 좌표 변환이 항상 buildGrid와 같은 결과를 내도록 한다.
 let koreaOffsetCol = 0
 let koreaOffsetRow = 0
 
-function buildGrid(width, height) {
-  const newCols = Math.max(1, Math.round(width / DOT_PX))
-  const newRows = Math.max(1, Math.round(height / DOT_PX))
+function buildGrid() {
+  const newCols = BASE_GRID_W
+  const newRows = BASE_GRID_H
   cols.value = newCols
   rows.value = newRows
 
@@ -200,18 +209,20 @@ function buildGrid(width, height) {
   landMask = newLandMask
   frameScratch = new Float32Array(cellCount)
   burstScratch = new Float32Array(cellCount)
+  burstVariant = new Array(cellCount).fill(null)
   prevTouched = []
   prevBurstTouched = []
   refreshDotElements()
 }
 
 // 데모/실제 데이터 토글 등으로 부모의 cities 배열이 통째로 교체되면 그리드를 다시 만든다.
-// (buildGrid는 zoom/pan 상태를 건드리지 않으므로 다시 그려도 화면 위치는 유지된다.)
+// (칸 수 자체는 고정이라 buildGrid()는 인자가 필요 없다. zoom/pan 상태도 건드리지 않으므로
+// 다시 그려도 화면 위치는 유지된다.)
 watch(
   () => props.cities,
   () => {
     if (!containerW || !containerH) return
-    buildGrid(containerW, containerH)
+    buildGrid()
   },
 )
 
@@ -226,9 +237,9 @@ async function refreshDotElements() {
 }
 
 // --- 확대/축소 · 커서 추종 팬 ---
-const MIN_SCALE = 1 // 최대 축소 = 기존 화면 그대로(가장자리 여백 없음)
-const MAX_SCALE = 2.4 // 최대 확대 = 기본 진입 배율
-const DEFAULT_SCALE = MAX_SCALE
+const MIN_SCALE = 1 // 최대 축소 = .korea-map__stage가 "한반도 + 약간의 바다" 비율로 화면에 꽉 찬 상태
+const MAX_SCALE = 2.4 // 최대 확대
+const DEFAULT_SCALE = MIN_SCALE // 처음 진입 시 바로 "한반도 + 약간의 바다"가 보이게 시작한다
 const ZOOM_SENSITIVITY = 0.0015
 const DRIFT_RATIO = 0.6 // 커서가 가장자리로 갈수록 팬 가용 범위의 몇 %까지 끌려가는지
 const PAN_LERP = 0.12
@@ -246,7 +257,7 @@ function clamp(value, min, max) {
 }
 
 // scale > 1일 때 콘텐츠가 컨테이너를 벗어나지 않는 pan 범위. scale === 1이면 [0,0]으로
-// 잠겨 기존처럼 여백 없이 꽉 차는 상태가 그대로 유지된다.
+// 잠겨, .korea-map__stage가 화면 중앙에 비율대로 꽉 찬(letterbox) 상태 그대로 유지된다.
 function panRangeX() {
   return [containerW * (1 - scale), 0]
 }
@@ -264,6 +275,18 @@ function clampPan() {
 function applyTransform() {
   if (!viewportRef.value) return
   viewportRef.value.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`
+  // transform(줌/팬)이 바뀔 때만 rect를 다시 읽는다 — mousemove마다 매번 읽던 것보다
+  // 훨씬 드물게 호출된다(휠 조작 시, 그리고 커서 추종 팬이 lerp로 정착하는 동안의 매 프레임).
+  refreshRects()
+}
+
+// root/grid의 bounding rect를 캐시해둔다. mousemove는 이 캐시만 읽어서, 화면이 정지해
+// 있는 동안(대부분의 시간)에는 마우스를 움직여도 레이아웃을 다시 읽지 않는다.
+let cachedRootRect = null
+let cachedGridRect = null
+function refreshRects() {
+  if (rootRef.value) cachedRootRect = rootRef.value.getBoundingClientRect()
+  if (gridRef.value) cachedGridRect = gridRef.value.getBoundingClientRect()
 }
 
 // 커서가 중심에서 벗어난 방향으로 지도가 살짝 끌려오도록, pan의 목표값을 커서 위치에 맞춰 갱신한다.
@@ -355,10 +378,11 @@ function spawnPress(col, row) {
   presses.push({ col, row, startTime: now })
 }
 
-function spawnBurst(col, row) {
+// variant: 'correct'(기본, 기존과 같은 크림색 느낌) | 'wrong'(빨간색 — 오답 클릭 위치 표시용)
+function spawnBurst(col, row, variant = 'correct') {
   const now = performance.now()
   if (bursts.length >= MAX_BURSTS) bursts.shift()
-  bursts.push({ col, row, startTime: now })
+  bursts.push({ col, row, startTime: now, variant })
   ensureTicking()
 }
 
@@ -392,8 +416,12 @@ function tick(now) {
   }
   for (const idx of prevBurstTouched) {
     burstScratch[idx] = 0
+    burstVariant[idx] = null
     const el = dotElements[idx]
-    if (el) el.style.removeProperty('--burst')
+    if (el) {
+      el.style.removeProperty('--burst')
+      el.style.removeProperty('--burst-color')
+    }
   }
 
   const touchedThisFrame = []
@@ -525,7 +553,10 @@ function tick(now) {
         if (contribution <= 0.02) continue
 
         if (burstScratch[idx] === 0) burstTouchedThisFrame.push(idx)
-        if (contribution > burstScratch[idx]) burstScratch[idx] = contribution
+        if (contribution > burstScratch[idx]) {
+          burstScratch[idx] = contribution
+          burstVariant[idx] = burst.variant
+        }
       }
     }
   }
@@ -538,7 +569,10 @@ function tick(now) {
 
   for (const idx of burstTouchedThisFrame) {
     const el = dotElements[idx]
-    if (el) el.style.setProperty('--burst', burstScratch[idx])
+    if (!el) continue
+    el.style.setProperty('--burst', burstScratch[idx])
+    if (burstVariant[idx] === 'wrong') el.style.setProperty('--burst-color', 'var(--danger)')
+    else el.style.removeProperty('--burst-color')
   }
   prevBurstTouched = burstTouchedThisFrame
 
@@ -553,24 +587,28 @@ function tick(now) {
 
 function handleMouseMove(event) {
   if (!rootRef.value || !gridRef.value) return
+  if (!cachedRootRect || !cachedGridRect) refreshRects()
 
-  const rootRect = rootRef.value.getBoundingClientRect()
-  updateDriftTarget(event.clientX - rootRect.left, event.clientY - rootRect.top)
+  updateDriftTarget(event.clientX - cachedRootRect.left, event.clientY - cachedRootRect.top)
 
   // 그리드의 실제 화면 rect는 이미 transform(줌/팬)이 반영돼 있어, 별도 역변환 없이
-  // 비율만으로 칸 좌표를 구할 수 있다.
-  const gridRect = gridRef.value.getBoundingClientRect()
-  const col = Math.floor(((event.clientX - gridRect.left) / gridRect.width) * cols.value)
-  const row = Math.floor(((event.clientY - gridRect.top) / gridRect.height) * rows.value)
+  // 비율만으로 칸 좌표를 구할 수 있다. rect는 캐시된 값을 쓴다(줌/팬이 바뀔 때만 갱신됨).
+  const col = Math.floor(((event.clientX - cachedGridRect.left) / cachedGridRect.width) * cols.value)
+  const row = Math.floor(((event.clientY - cachedGridRect.top) / cachedGridRect.height) * rows.value)
 
   if (col >= 0 && col < cols.value && row >= 0 && row < rows.value) {
     // 같은 칸에 머무는 동안은 아무 것도 새로 만들지 않는다 — 칸이 바뀔 때만 1회 반응한다.
     if (col !== lastActiveCol || row !== lastActiveRow) {
       lastActiveCol = col
       lastActiveRow = row
-      const idx = row * cols.value + col
-      if (landMask[idx]) spawnPress(col, row)
-      else spawnRipple(col, row)
+      // 게임 진행 중에는 파동/프레스를 만들지 않는다 — 정답을 찾느라 지도 전체를 빠르게
+      // 훑는 조작 패턴에서 매 프레임 수백~수천 개 도트의 스타일을 다시 쓰게 되어 렉의
+      // 주된 원인이었다. 클릭 시 burst 피드백(정답/오답)은 게임 중에도 그대로 남는다.
+      if (!props.gameActive) {
+        const idx = row * cols.value + col
+        if (landMask[idx]) spawnPress(col, row)
+        else spawnRipple(col, row)
+      }
     }
   }
 
@@ -588,7 +626,8 @@ function handleResize(entries) {
   if (!entry) return
   containerW = entry.contentRect.width
   containerH = entry.contentRect.height
-  buildGrid(containerW, containerH)
+  // 칸 수는 고정이라(BASE_GRID_W/H) 리사이즈만으로는 buildGrid를 다시 부를 필요가 없다 —
+  // pan 범위(containerW/H 기준)만 다시 clamp하면 된다.
   clampPan()
   applyTransform()
 }
@@ -597,7 +636,7 @@ onMounted(() => {
   if (!rootRef.value) return
   containerW = rootRef.value.clientWidth
   containerH = rootRef.value.clientHeight
-  buildGrid(containerW, containerH)
+  buildGrid()
 
   scale = DEFAULT_SCALE
   panX = containerW * (1 - scale) / 2
@@ -666,36 +705,41 @@ function handleCityHover(dot, event) {
   >
     <div ref="viewportRef" class="korea-map__viewport">
       <div
-        ref="gridRef"
-        class="korea-map__grid"
-        :style="{
-          gridTemplateColumns: `repeat(${cols}, 1fr)`,
-          gridTemplateRows: `repeat(${rows}, 1fr)`,
-        }"
+        class="korea-map__stage"
+        :style="{ aspectRatio: `${BASE_GRID_W} / ${BASE_GRID_H}` }"
       >
-        <span
-          v-for="dot in dots"
-          :key="`${dot.col}-${dot.row}`"
-          class="korea-map__dot"
-          :class="{
-            'is-land': dot.isLand,
-            'is-city': dot.city,
-            'is-selected': dot.city?.id === selectedId,
-            [`is-condition-${dot.city?.condition}`]: !!dot.city,
+        <div
+          ref="gridRef"
+          class="korea-map__grid"
+          :style="{
+            gridTemplateColumns: `repeat(${cols}, 1fr)`,
+            gridTemplateRows: `repeat(${rows}, 1fr)`,
           }"
-          :style="
-            dot.city
-              ? {
-                  background: markerColor(dot.city.condition),
-                  '--pulse-color': pulseColor(dot.city),
-                  '--marker-border-color': markerBorderColor(dot.city),
-                }
-              : undefined
-          "
-          @mouseenter="dot.city && !gameActive && handleCityHover(dot, $event)"
-          @mouseleave="hoveredDot = null"
-          @click="handleDotClick(dot, $event)"
-        />
+        >
+          <span
+            v-for="dot in dots"
+            :key="`${dot.col}-${dot.row}`"
+            class="korea-map__dot"
+            :class="{
+              'is-land': dot.isLand,
+              'is-city': dot.city && !gameActive,
+              'is-selected': dot.city?.id === selectedId && !gameActive,
+              [`is-condition-${dot.city?.condition}`]: !!dot.city && !gameActive,
+            }"
+            :style="
+              dot.city && !gameActive
+                ? {
+                    background: markerColor(dot.city.condition),
+                    '--pulse-color': pulseColor(dot.city),
+                    '--marker-border-color': markerBorderColor(dot.city),
+                  }
+                : undefined
+            "
+            @mouseenter="dot.city && !gameActive && handleCityHover(dot, $event)"
+            @mouseleave="hoveredDot = null"
+            @click="handleDotClick(dot, $event)"
+          />
+        </div>
       </div>
     </div>
 
@@ -722,8 +766,20 @@ function handleCityHover(dot, event) {
 .korea-map__viewport {
   position: absolute;
   inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   transform-origin: 0 0;
   will-change: transform;
+}
+
+/* "한반도 + 약간의 바다" 비율의 박스 — 화면 비율과 무관하게 이 비율을 유지한 채 뷰포트
+   안에 최대한 크게(넘치지 않게) 중앙 배치된다(비율은 :style로 바인딩된 BASE_GRID_W/H).
+   남는 여백은 부모 .weather-map의 바다색 배경이 그대로 비쳐 보여, 화면을 전부 도트로
+   채우던 예전보다 총 도트 수가 훨씬 줄어든다(성능 최적화). */
+.korea-map__stage {
+  max-width: 100%;
+  max-height: 100%;
 }
 
 .korea-map__grid {
@@ -739,9 +795,14 @@ function handleCityHover(dot, event) {
   height: 100%;
   border-radius: 50%;
   /* 완전히 평평한 단색 도트. 파동이 지나갈 때는 단순히 밝아지는 게 아니라 육지 픽셀에 쓰는
-     크림 화이트(--dot-lit)와 섞여, 물결이 반짝이는 "윤슬"처럼 보이게 한다. */
+     크림 화이트(--dot-lit)와 섞여, 물결이 반짝이는 "윤슬"처럼 보이게 한다. burst(선택
+     이펙트)는 한 겹 더 --burst-color(기본값 크림 화이트, 오답이면 빨간색)로 섞는다. */
   background: #7cc0cb; /* color-mix 미지원 환경 폴백 */
-  background-color: color-mix(in srgb, var(--dot-lit) calc(var(--intensity, 0) * 100%), #7cc0cb);
+  background-color: color-mix(
+    in srgb,
+    var(--burst-color, var(--dot-lit)) calc(var(--burst, 0) * 100%),
+    color-mix(in srgb, var(--dot-lit) calc(var(--intensity, 0) * 100%), #7cc0cb)
+  );
   transform: scale(calc(1 + var(--burst, 0) * 0.8));
   filter: brightness(calc(1 + var(--burst, 0) * 1.2));
   /* 자기 배경색보다 약 15% 어둡게 계산한 box-shadow로 칸 사이 격자 간격을 메워, 바다가
@@ -751,7 +812,8 @@ function handleCityHover(dot, event) {
 }
 
 .korea-map__dot.is-land {
-  background: var(--dot-lit);
+  /* 평소엔 그대로 육지색, burst가 있으면 --burst-color(기본 크림 화이트, 오답이면 빨간색)로 섞인다. */
+  background-color: color-mix(in srgb, var(--burst-color, var(--dot-lit)) calc(var(--burst, 0) * 100%), var(--dot-lit));
   /* 프레스는 어두워지고 오그라들고, burst(선택 이펙트)는 반대로 밝아지며 부풀어 오른다 —
      둘 다 같은 도트에서 동시에 일어날 수 있어 한 식에서 합성한다. */
   filter: brightness(calc(1 - var(--intensity, 0) * 0.4 + var(--burst, 0) * 1.2));

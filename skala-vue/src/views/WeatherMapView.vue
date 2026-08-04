@@ -198,10 +198,15 @@ function startGame() {
 }
 
 // 게임이 진행 중일 때만 지도가 클릭을 map-pick으로 보낸다(KoreaMapDots의 gameActive prop).
-// 정답 위치에는 맞았든 틀렸든 burst 이펙트를 띄워 정답을 알려준다.
+// 정답 위치에는 항상(기존 크림색 burst), 오답이면 클릭한 위치에도 빨간 burst를 추가로 띄워
+// "여기가 틀렸다"를 바로 알 수 있게 한다.
 function handleMapPick({ col, row }) {
-  const answer = game.submitGuess(col, row, (mapX, mapY) => mapDotsRef.value?.mapToColRow(mapX, mapY))
-  if (answer) mapDotsRef.value?.spawnBurst(answer.col, answer.row)
+  const result = game.submitGuess(col, row, (mapX, mapY) => mapDotsRef.value?.mapToColRow(mapX, mapY))
+  if (!result) return
+  mapDotsRef.value?.spawnBurst(result.answer.col, result.answer.row, 'correct')
+  if (!result.correct) {
+    mapDotsRef.value?.spawnBurst(result.clicked.col, result.clicked.row, 'wrong')
+  }
 }
 
 const formattedTimeLeft = computed(() => {
@@ -334,7 +339,7 @@ const mascotCondition = computed(() => {
                 {{
                   game.lastResult.value.correct
                     ? `정답! +${game.lastResult.value.points}`
-                    : `아쉬워요 — ${game.lastResult.value.region.name}였어요`
+                    : `아쉬워요! 정답은 ${game.lastResult.value.region.name} · 클릭한 곳: ${game.lastResult.value.clickedRegionName ?? '바다 근처'}`
                 }}
               </p>
             </template>

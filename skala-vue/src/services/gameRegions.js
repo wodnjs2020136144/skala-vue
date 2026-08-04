@@ -21,10 +21,26 @@ const EXTRA_REGIONS = [
   { id: 'region_andong', name: '안동', mapX: 0.659, mapY: 0.695 },
   { id: 'region_changwon', name: '창원', mapX: 0.568, mapY: 0.793 },
   { id: 'region_cheonan', name: '천안', mapX: 0.477, mapY: 0.671 },
+  // 본토와 떨어진 섬(KOREA_MATRIX에서 육지 본토 덩어리와 분리된 고립 칸) — 반드시 포함해야
+  // 해서 좌표를 매트릭스에서 직접 찾아 검증했다.
+  { id: 'region_ulleungdo', name: '울릉도', mapX: 0.841, mapY: 0.573 },
+  { id: 'region_dokdo', name: '독도', mapX: 0.977, mapY: 0.598 },
+  { id: 'region_sejong', name: '세종', mapX: 0.432, mapY: 0.695 },
+  { id: 'region_gumi', name: '구미', mapX: 0.659, mapY: 0.72 },
+  { id: 'region_gyeongju', name: '경주', mapX: 0.75, mapY: 0.744 },
+  { id: 'region_jinju', name: '진주', mapX: 0.477, mapY: 0.793 },
+  { id: 'region_naju', name: '나주', mapX: 0.295, mapY: 0.817 },
+  { id: 'region_gunsan', name: '군산', mapX: 0.341, mapY: 0.72 },
+  { id: 'region_seosan', name: '서산', mapX: 0.295, mapY: 0.646 },
+  { id: 'region_chungju', name: '충주', mapX: 0.614, mapY: 0.671 },
+  { id: 'region_taebaek', name: '태백', mapX: 0.614, mapY: 0.549 },
+  { id: 'region_samcheok', name: '삼척', mapX: 0.705, mapY: 0.622 },
+  { id: 'region_geoje', name: '거제', mapX: 0.614, mapY: 0.841 },
+  { id: 'region_tongyeong', name: '통영', mapX: 0.568, mapY: 0.817 },
 ]
 
-// CITY_LIST의 9개 도시(좌표 검증 완료, 실제 앱에서 이미 정상 표시 중)에 위 12곳을 더해
-// 총 21곳. 문제 지역을 CITY_LIST와 완전히 분리하지 않고 재사용하는 이유: 사용자에게
+// CITY_LIST의 9개 도시(좌표 검증 완료, 실제 앱에서 이미 정상 표시 중)에 위 26곳을 더해
+// 총 35곳. 문제 지역을 CITY_LIST와 완전히 분리하지 않고 재사용하는 이유: 사용자에게
 // 친숙한 주요 도시도 문제로 나와야 게임 난이도가 자연스럽다.
 export const GAME_REGION_LIST = [
   ...CITY_LIST.map((city) => ({ id: `game_${city.id}`, name: city.name, mapX: city.mapX, mapY: city.mapY })),

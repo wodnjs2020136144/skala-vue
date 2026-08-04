@@ -11,6 +11,7 @@
   --amber: #c98a2c;
   --moss: #5e6b5a;
   --sea: #5c9ca8;
+  --danger: #b8442f; /* 오답 이펙트 등 경고 표시에 쓰는, 팔레트 톤에 맞춘 채도 낮은 벽돌색 */
 
   --font-pixel: 'Silkscreen', ui-monospace, monospace;
   /* 한글 도트 폰트. 작은 텍스트(안내문/설명)에는 쓰지 않고, 큰 제목류에만 제한적으로 사용해 가독성을 지킨다. */

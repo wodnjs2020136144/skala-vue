@@ -1,11 +1,14 @@
 import { onUnmounted, ref } from 'vue'
 import { GAME_REGION_LIST } from '../services/gameRegions'
 
-const ROUNDS_PER_GAME = 5
-const TIME_LIMIT_SEC = 60
+const ROUNDS_PER_GAME = 10
+const TIME_LIMIT_SEC = 30
 const TOLERANCE = 2.5 // 칸 — 이 거리 안에 클릭하면 정답으로 인정
 const MAX_ROUND_SCORE = 200 // 정확히 맞췄을 때 만점
 const BEST_SCORE_KEY = 'skala-weather-map-game-best-score'
+// 오답 클릭 위치에서 이 거리(칸) 안에 있는 지역이 있으면 "그 지역이었어요"라고 알려준다.
+// TOLERANCE보다 살짝 넉넉하게 둬서, 아깝게 틀린 경우 근처 지역 이름을 짚어줄 수 있게 한다.
+const CLICK_LABEL_RADIUS = 3
 
 // "한반도 지역 찾기" 미니게임의 상태 기계. WeatherMapView가 이미 지도·팝업·정보창 로직으로
 // 커지고 있어, 게임 상태는 별도 컴포저블로 분리해 뷰 컴포넌트가 UI 배선에만 집중하게 한다.
@@ -25,6 +28,22 @@ export function useRegionGame() {
   function pickRounds() {
     const shuffled = [...GAME_REGION_LIST].sort(() => Math.random() - 0.5)
     return shuffled.slice(0, ROUNDS_PER_GAME)
+  }
+
+  // 오답 클릭 위치와 가장 가까운 게임 지역을 찾는다 — "당신이 클릭한 곳은 OO였어요"용.
+  // 전체 지역이 많아야 30여 개라 매 클릭마다 전수 조사해도 비용은 무시할 만하다.
+  function nearestRegionName(col, row, toColRow) {
+    let closest = null
+    let closestDist = Infinity
+    for (const region of GAME_REGION_LIST) {
+      const pos = toColRow(region.mapX, region.mapY)
+      const d = Math.hypot(col - pos.col, row - pos.row)
+      if (d < closestDist) {
+        closestDist = d
+        closest = region
+      }
+    }
+    return closestDist <= CLICK_LABEL_RADIUS ? (closest?.name ?? null) : null
   }
 
   function stopTimer() {
@@ -63,8 +82,9 @@ export function useRegionGame() {
     }, 1000)
   }
 
-  // 지도 클릭 지점(col,row)과 정답 칸의 거리로 채점한다. 정답 칸 좌표를 반환해 뷰가 그
-  // 위치에 burst 이펙트를 띄울 수 있게 한다.
+  // 지도 클릭 지점(col,row)과 정답 칸의 거리로 채점한다. 정답 칸 좌표와 클릭 좌표를 함께
+  // 반환해 뷰가 정답 위치(항상)·클릭 위치(오답일 때만, 빨간 이펙트용)에 burst를 띄울 수
+  // 있게 한다.
   function submitGuess(col, row, toColRow) {
     if (status.value !== 'playing' || !currentRegion.value) return null
 
@@ -85,7 +105,13 @@ export function useRegionGame() {
       combo.value = 0
     }
 
-    lastResult.value = { correct, points, region }
+    lastResult.value = {
+      correct,
+      points,
+      region,
+      // 오답일 때만: 클릭한 곳이 무슨 지역이었는지(가까운 지역이 없으면 null → "바다 근처")
+      clickedRegionName: correct ? null : nearestRegionName(col, row, toColRow),
+    }
 
     roundIndex.value += 1
     if (roundIndex.value >= rounds.length) {
@@ -94,7 +120,7 @@ export function useRegionGame() {
       currentRegion.value = rounds[roundIndex.value]
     }
 
-    return answer
+    return { correct, answer, clicked: { col, row } }
   }
 
   onUnmounted(stopTimer)

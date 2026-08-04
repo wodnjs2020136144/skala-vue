@@ -1170,6 +1170,143 @@
 
 ---
 
+## 17. 게임 오답 피드백 강화 + 난이도 조정 + 성능 최적화 + 정답 노출 방지 + 지역 확충
+
+**요구사항**
+- 게임에서 틀릴 경우 클릭한 지역이 어디였는지도 알려준다.
+- 게임 시간을 30초로, 맞출 개수를 10개로 조정한다.
+- 오답 이펙트를 정답과 구분되게 빨간색으로 표시한다.
+- 게임 진행 중 렉이 심하다는 피드백에 대해 최적화 방안을 제시하고 적용한다.
+- (추가 요청) 게임 시작 시 9개 주요 도시가 다른 지역과 구분되지 않게 한다.
+- (추가 요청) 게임 지역을 더 추가하되 울릉도·독도는 반드시 포함한다.
+- (추가 요청, 사용자 제안) "가장 축소된 화면이 한반도 전체 + 약간의 바다만 보이는" 크기로 바꾸면 최적화가 되는지 확인하고, 맞다면 적용한다.
+
+**사고 과정**
+- 렉의 원인을 코드 레벨에서 먼저 진단했다. `KoreaMapDots.vue`는 화면 전체를 도트로 채우는데, 예전엔 화면 픽셀 크기를 고정 도트 크기(14px)로 나눠 칸 수를 정했다 — 화면이 넓을수록 칸(=DOM 노드) 수가 4000~6000개까지 늘어나는 구조였다. 평소 브라우징(가끔 호버)에서는 괜찮았지만, "지역 찾기" 게임은 정답을 찾으려고 커서로 지도 전체를 빠르고 넓게 훑는 조작을 유도하는 게임이라, 파동/프레스 이펙트가 상한(각 10개)까지 거의 항상 차 있는 최악의 경우가 몇 초씩 지속되며 매 프레임 수백~수천 개 도트의 스타일을 다시 쓰게 되어 렉이 났다. 추가로 `handleMouseMove`가 마우스가 움직일 때마다 `getBoundingClientRect()`를 두 번씩 호출하는 것도 불필요한 레이아웃 읽기였다.
+- 사용자가 먼저 제안한 "가장 축소된 화면을 한반도+약간의 바다로" 아이디어를 검토해보니, 실제로 최적화가 맞았다 — 다만 단순히 확대/축소 배율(scale) 숫자만 바꿔서는 안 됐다. 줌은 CSS transform으로 화면에 이미 존재하는 도트들을 시각적으로 늘리고 줄일 뿐이라, 배율 상수를 조정해도 실제 DOM 노드 수(=성능 비용)는 그대로였다. 진짜 최적화가 되려면 **칸 개수 자체를 "한반도 매트릭스 크기 + 약간의 여백"으로 고정**하고, 화면 크기와 무관하게 그 칸 수만 그리도록 렌더링 방식을 바꿔야 했다(화면이 넓어져도 칸 하나가 커질 뿐, 칸 개수는 늘지 않는다). 이렇게 하면 4000~6000개였던 도트가 항상 1316개로 고정된다(약 70% 감소). 이 김에 처음 진입 시 기본 배율도 "한반도+약간의 바다"가 보이는 배율(기존 최대 축소 배율)로 바꿔, 사용자가 설명한 화면이 처음 들어왔을 때부터 보이게 했다.
+- 오답 시 "내가 클릭한 곳"을 알려주려면 임의의 클릭 좌표를 다시 지역 이름으로 되짚어야 하는데, 정확히 그 칸에 있는 지역이 아닐 수도 있어(대부분 바다거나 지역이 없는 육지) "가장 가까운 지역을 찾고, 너무 멀면 지역이 없다고 본다"는 최근접 탐색 방식을 택했다. 게임 지역이 최대 35개뿐이라 매 클릭마다 전체를 순회해도 비용이 무시할 만하다.
+- 게임 중 주요 도시가 다른 지역과 구분되지 않아야 한다는 요청은, 정답을 미리 알려주는 문제를 완전히 없애기 위한 것이었다. 9개 도시만 색상 마커·테두리·호버 확대·글로우 링을 갖고 있어서 게임 중에도 이 스타일이 남아있으면 이 9곳만 시각적으로 튀는 문제가 있었다 — 게임 중엔 관련 클래스·인라인 스타일을 아예 적용하지 않는 방식으로 해결했다(다른 26개 게임 지역은 애초에 `cities` prop에 없어 이미 구분이 안 된다).
+- 지역 확충은 `KOREA_MATRIX`에서 본토 덩어리와 떨어진 고립된 칸을 찾아 울릉도·독도 좌표를 특정하고, 그 외 12곳(세종·구미·경주·진주·나주·군산·서산·충주·태백·삼척·거제·통영)을 지리적으로 자연스러운 위치에 배치했다. 모든 신규 좌표를 Node.js로 육지 여부·중복 여부 전수 검증한 뒤에만 반영했다(이전 라운드에서 그리드 폭을 잘못 가정해 좌표가 바다에 찍혔던 실수를 반복하지 않기 위해).
+
+**해결 과정**
+1. `src/composables/useRegionGame.js`의 난이도 상수를 바꾸고, 오답 클릭 위치의 최근접 지역을 찾는 `nearestRegionName`을 추가했다. `submitGuess`가 오답일 때 `lastResult.clickedRegionName`을 채우고, 반환값을 `{ correct, answer, clicked }`로 확장했다.
+
+   #### `src/composables/useRegionGame.js`
+   ```js
+   const ROUNDS_PER_GAME = 10
+   const TIME_LIMIT_SEC = 30
+   const CLICK_LABEL_RADIUS = 3
+
+   function nearestRegionName(col, row, toColRow) {
+     let closest = null
+     let closestDist = Infinity
+     for (const region of GAME_REGION_LIST) {
+       const pos = toColRow(region.mapX, region.mapY)
+       const d = Math.hypot(col - pos.col, row - pos.row)
+       if (d < closestDist) { closestDist = d; closest = region }
+     }
+     return closestDist <= CLICK_LABEL_RADIUS ? (closest?.name ?? null) : null
+   }
+   // submitGuess 안:
+   lastResult.value = {
+     correct, points, region,
+     clickedRegionName: correct ? null : nearestRegionName(col, row, toColRow),
+   }
+   return { correct, answer, clicked: { col, row } }
+   ```
+2. `src/assets/retro-theme.css`에 오답용 색상 토큰을 추가했다.
+
+   #### `src/assets/retro-theme.css`
+   ```css
+   --danger: #b8442f; /* 오답 이펙트 등 경고 표시에 쓰는, 팔레트 톤에 맞춘 채도 낮은 벽돌색 */
+   ```
+3. `src/components/practices/weather/KoreaMapDots.vue`의 `spawnBurst`에 `variant`('correct'|'wrong')를 추가하고, burst 처리 루프에서 셀별 최고 강도를 기록할 때 그 강도를 만든 burst의 variant도 병렬 배열(`burstVariant`)에 함께 기록해, 오답 burst만 `--burst-color`를 빨간색으로 설정하게 했다.
+
+   #### `src/components/practices/weather/KoreaMapDots.vue`
+   ```js
+   function spawnBurst(col, row, variant = 'correct') {
+     const now = performance.now()
+     if (bursts.length >= MAX_BURSTS) bursts.shift()
+     bursts.push({ col, row, startTime: now, variant })
+     ensureTicking()
+   }
+   // tick() 안:
+   if (contribution > burstScratch[idx]) {
+     burstScratch[idx] = contribution
+     burstVariant[idx] = burst.variant
+   }
+   // 터치된 셀에 스타일 쓰는 부분:
+   el.style.setProperty('--burst', burstScratch[idx])
+   if (burstVariant[idx] === 'wrong') el.style.setProperty('--burst-color', 'var(--danger)')
+   else el.style.removeProperty('--burst-color')
+   ```
+   CSS의 background-color를 `color-mix()` 두 겹으로 체이닝해, burst가 0이면 기존과 동일하고 `--burst-color`가 없으면 크림 화이트로, 있으면(오답) 그 색으로 섞이게 했다.
+4. `src/views/WeatherMapView.vue`의 `handleMapPick`이 새 반환값에 맞춰 정답 위치엔 항상(`'correct'`), 오답이면 클릭 위치에도(`'wrong'`) burst를 띄우도록 바꾸고, 피드백 문구에 클릭한 곳 이름을 추가했다.
+
+   #### `src/views/WeatherMapView.vue`
+   ```js
+   function handleMapPick({ col, row }) {
+     const result = game.submitGuess(col, row, (mapX, mapY) => mapDotsRef.value?.mapToColRow(mapX, mapY))
+     if (!result) return
+     mapDotsRef.value?.spawnBurst(result.answer.col, result.answer.row, 'correct')
+     if (!result.correct) mapDotsRef.value?.spawnBurst(result.clicked.col, result.clicked.row, 'wrong')
+   }
+   ```
+   ```
+   아쉬워요! 정답은 {region.name} · 클릭한 곳: {clickedRegionName ?? '바다 근처'}
+   ```
+5. `src/services/gameRegions.js`에 울릉도·독도를 포함한 14곳을 추가했다(9개 도시 + 26개 = 총 35곳). 모든 좌표를 Node.js로 `KOREA_MATRIX`의 육지 칸('1')에 정확히 떨어지는지, 서로 중복되지 않는지 전수 검증했다.
+
+   #### `src/services/gameRegions.js`
+   ```js
+   { id: 'region_ulleungdo', name: '울릉도', mapX: 0.841, mapY: 0.573 },
+   { id: 'region_dokdo', name: '독도', mapX: 0.977, mapY: 0.598 },
+   // ...세종·구미·경주·진주·나주·군산·서산·충주·태백·삼척·거제·통영
+   ```
+6. `KoreaMapDots.vue` 템플릿에서 `is-city`/`is-selected`/조건별 클래스와 마커 인라인 스타일을 `!gameActive`일 때만 적용하도록 바꿔, 게임 중엔 9개 주요 도시 칸도 평범한 육지 도트로 렌더링되게 했다.
+7. **성능 최적화 3가지를 적용했다**:
+   - (a) `handleMouseMove`에서 새 칸에 들어왔을 때 파동/프레스를 생성하는 부분을 `!props.gameActive`로 감쌌다 — 게임 중엔 만들지 않는다(클릭 시 burst 피드백은 그대로 유지).
+   - (b) root/grid의 `getBoundingClientRect()`를 캐시(`cachedRootRect`/`cachedGridRect`)하고, 실제로 변형이 바뀌는 시점(`applyTransform()` 호출 시 — 마운트·리사이즈·줌·팬)에만 다시 읽도록 바꿔, mousemove마다 반복되던 레이아웃 읽기를 없앴다.
+   - (c) 칸 개수를 화면 픽셀 크기에서 역산하던 방식을 버리고, "한반도 매트릭스 + 여백 3칸"(28×47=1316칸)으로 고정했다. `.korea-map__grid`를 감싸는 새 `.korea-map__stage`에 `aspect-ratio`를 주고 부모(`.korea-map__viewport`)를 flex 중앙 정렬로 바꿔, 화면 비율과 무관하게 이 비율의 박스가 화면 안에 최대한 크게(넘치지 않게) 중앙 배치되게 했다 — 화면을 꽉 채우던 바다 도트가 사라지고, 도트 총 개수가 화면 크기와 무관하게 항상 1316개로 고정된다(기존 대비 약 70% 감소). 칸 수가 고정이라 `handleResize`에서 더 이상 `buildGrid()`를 다시 호출할 필요가 없어져(그 자체로 추가 이득) `containerW/H` 갱신과 `clampPan()`만 하도록 정리했다. 처음 진입 시 배율(`DEFAULT_SCALE`)도 최대 확대(`MAX_SCALE`)에서 최소 축소(`MIN_SCALE`)로 바꿔, 진입하자마자 "한반도+약간의 바다"가 보이게 했다.
+
+   #### `src/components/practices/weather/KoreaMapDots.vue`
+   ```js
+   const MAP_MARGIN_CELLS = 3
+   const BASE_GRID_W = GRID_W + MAP_MARGIN_CELLS * 2 // 28
+   const BASE_GRID_H = GRID_H + MAP_MARGIN_CELLS * 2 // 47
+
+   function buildGrid() {
+     const newCols = BASE_GRID_W
+     const newRows = BASE_GRID_H
+     // ...이하 동일(칸 수만 상수로 고정)
+   }
+   ```
+   ```css
+   .korea-map__viewport { display: flex; align-items: center; justify-content: center; ... }
+   .korea-map__stage { max-width: 100%; max-height: 100%; } /* :style="{ aspectRatio: '28 / 47' }" */
+   ```
+8. `npx vite build`로 컴파일 오류 없음을 확인하고, 개발 서버를 임시로 띄워 수정한 파일 5개 전부 200으로 정상 서빙됨을 확인했다. 서빙된 실제 코드에서 `ROUNDS_PER_GAME = 10`, `TIME_LIMIT_SEC = 30`, `--danger` 토큰, `gameRegions.js`의 신규 지역 26개(`region_` 접두사 카운트)가 모두 반영됐는지 grep으로 확인했다. 신규 좌표 21곳(기존 21+신규 14=35 전체) 전부가 `KOREA_MATRIX`의 육지 칸에 떨어지고 서로 중복되지 않는지 Node.js로 전수 검증했다. 고정 그리드(28×47=1316칸)가 기존 대비 실제로 크게 줄어드는 값인지도 Node.js로 재확인했다.
+
+**트러블슈팅**
+- 문제: 처음 울릉도·독도·강릉 좌표를 계산할 때 `KOREA_MATRIX` 행 문자열 길이를 잘못 가정해서(23으로 착각, 실제로는 `GRID_W=22`) 일부 후보 좌표가 육지가 아닌 바다 칸에 걸렸다.
+- 원인: 그리드 폭 상수를 코드에서 직접 확인하지 않고 어림으로 계산했다(이전 라운드에서 이미 한 번 겪었던 것과 같은 유형의 실수).
+- 해결: 이번에도 좌표를 파일에 반영하기 전에 Node.js로 전체 좌표(신규 14곳 + 기존 21곳)를 `KOREA_MATRIX`에 대입해 전부 육지인지, 서로 중복되지 않는지 자동 검증하는 스크립트를 먼저 돌렸고, 이 과정에서 강릉·속초 좌표 오류를 실제 코드에 반영하기 전에 잡아냈다.
+- 문제: 이번에도 Chrome 브라우저 자동화 확장이 연결되지 않아(`tabs_context_mcp` 호출 시 "Browser extension is not connected") 실제 화면에서 렉 개선 체감, 빨간 오답 이펙트, 도시 스타일 숨김, 축소된 기본 화면 등을 직접 확인하지 못했다.
+- 원인: 이전 라운드들과 동일한 브라우저 확장 연결 문제(원인 미상).
+- 해결: 빌드 통과, 개발 서버 curl 확인(수정 파일 전부 200, 서빙된 코드에 상수·토큰·지역 반영 확인), 좌표·그리드 크기 계산을 Node.js로 검증하는 것까지만 내가 확인할 수 있는 범위였다. 실제 플레이 체감(렉 개선, 시각적 구분 여부 등)은 사용자에게 확인을 요청했다.
+
+**결과**
+- 빌드 통과, 수정한 파일 5개 모두 Vite에서 정상 컴파일·서빙됨을 확인했다.
+- 게임 지역이 9(도시)+26(신규 확충)=35곳으로 늘었고, 울릉도·독도를 포함해 전부 육지·비중복임을 Node.js로 확인했다.
+- 고정 그리드 크기(28×47=1316칸)가 기존 화면 크기 기반 방식(보통 4000~6000칸) 대비 약 70% 적음을 확인했다.
+- (브라우저 자동화 도구 연결 불가로 실제 화면 확인은 사용자 몫으로 남음) 코드상으로는 오답 시 클릭 위치가 빨간 burst로, 정답 위치는 기존 색으로 표시되도록, 피드백 문구에 클릭한 곳 이름이 나오도록, 30초/10문제로, 게임 중 9개 주요 도시가 평범한 육지처럼 보이도록, 지도가 "한반도+약간의 바다" 비율로 화면 중앙에 고정 크기로 뜨도록 구현했다.
+
+**느낀점**
+- 사용자가 먼저 제안한 최적화 아이디어("가장 축소된 화면을 한반도+바다만 보이게")를 검토하면서, "겉보기엔 비슷해 보이는 변경(배율 숫자만 조정)"과 "실제로 비용을 줄이는 변경(렌더링 대상 자체를 줄임)"이 다르다는 걸 명확히 짚어낼 수 있었던 게 도움이 됐다. 사용자의 직관이 맞는 방향이었지만, 그 직관을 그대로(스케일 상수 조정) 구현했다면 실제로는 아무 성능 개선이 없었을 것이다 — 제안의 "의도"와 "구현 방법"을 분리해서, 의도를 살리는 다른 구현(칸 수 고정)을 찾는 게 중요했다.
+- 좌표 검증 실수를 이번에도 반복했다는 게 뼈아팠다 — 그리드 폭 같은 "코드에 이미 있는 값"은 절대 기억이나 어림으로 다시 계산하지 말고 항상 코드에서 직접 읽어와야 한다는 교훈을 다시 얻었다. 다만 검증 스크립트를 먼저 돌리는 습관 덕분에 실제 코드에는 오류가 들어가지 않았다는 점에서, "실수를 안 하는 것"보다 "실수를 반영되기 전에 걸러내는 절차"가 더 신뢰할 수 있는 안전장치라는 것도 다시 확인했다.
+
+---
+
 <!--
 아래 형식을 복사해서 작업 단위마다 항목을 추가합니다.
 
