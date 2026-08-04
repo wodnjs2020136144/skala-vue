@@ -50,6 +50,18 @@ onMounted(async () => {
 
 watch(() => demoStore.useDummyData, loadCities)
 
+// 이미 /map에 있는 상태에서 다른 즐겨찾기의 "지도에서 보기"를 누르면 같은 라우트(쿼리만
+// 다름)라 컴포넌트가 재마운트되지 않아 onMounted가 다시 실행되지 않는다 — 그 경우를
+// route.query.city 변경 감시로 보완한다(최초 진입은 위 onMounted가 그대로 처리).
+watch(
+  () => route.query.city,
+  (cityId) => {
+    if (!cityId) return
+    const city = cityList.value.find((c) => c.id === cityId)
+    if (city) selectCityById(city)
+  },
+)
+
 // 상단 검색창에 입력한 이름이 지도의 도시 이름과 정확히 일치하면 그 도시 팝업을 연다.
 // 부분 일치로 하면 첫 글자만 쳐도 팝업이 열려버려서 완전 일치로 제한한다.
 watch(
@@ -159,7 +171,8 @@ function closePopup() {
   min-height: calc(100vh - 57px);
   margin: 0;
   padding: 0;
-  background-color: var(--sea);
+  /* 도트 픽셀 뒤에 깔리는 원색 — 청록(--sea) 대신 테마의 근접-검정 톤으로 자연스럽게. */
+  background-color: var(--ink);
   animation: sea-shimmer 6s ease-in-out infinite;
   will-change: filter;
 }

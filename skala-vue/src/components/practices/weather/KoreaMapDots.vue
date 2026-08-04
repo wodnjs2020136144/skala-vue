@@ -1,5 +1,5 @@
 <script setup>
-import { nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 
 const props = defineProps({
   cities: {
@@ -169,6 +169,16 @@ function buildGrid(width, height) {
   refreshDotElements()
 }
 
+// 데모/실제 데이터 토글 등으로 부모의 cities 배열이 통째로 교체되면 그리드를 다시 만든다.
+// (buildGrid는 zoom/pan 상태를 건드리지 않으므로 다시 그려도 화면 위치는 유지된다.)
+watch(
+  () => props.cities,
+  () => {
+    if (!containerW || !containerH) return
+    buildGrid(containerW, containerH)
+  },
+)
+
 // v-for 렌더 순서는 dots.value(row-major)와 동일하므로, 실제 DOM 엘리먼트를
 // dot.index로 바로 찾을 수 있게 한 번 수집해둔다. 파동 애니메이션이 이 배열에
 // Vue 반응형을 거치지 않고 직접 style을 써서, 매 프레임 전체 그리드 재렌더를 피한다.
@@ -258,10 +268,12 @@ function handleWheel(event) {
   applyTransform()
 }
 
-// --- 커서 눌림 파동 ---
-// 커서가 지나간 자리마다 "파동"을 하나씩 등록하고, 매 프레임 그 파동이 링 모양으로
-// 퍼져나가며 감쇠하는 강도를 계산해 실제 DOM 도트에 반영한다. 육지 칸은 계산에서
-// 완전히 건너뛰어 바다에서만 물결이 일렁이게 한다.
+// --- 커서 눌림 파동(바다) · 프레스(육지) ---
+// 커서가 새로운 칸에 들어올 때마다 그 칸이 바다면 파동을, 육지면 "눌림(프레스)"을 하나
+// 등록한다. 같은 칸 안에서 커서가 미세하게 움직이는 것만으로는 아무것도 새로 생기지
+// 않는다 — lastActiveCol/Row로 "마지막으로 반응한 칸"을 기억해두고, 칸이 바뀔 때만
+// 트리거한다(handleMouseMove 참고).
+// 매 프레임 그 효과가 어떻게 번지고 사그라드는지 계산해 실제 DOM 도트에 반영한다.
 // 성능: Vue 반응형을 거치면 도트 하나만 바뀌어도 ~수천 개 v-for 전체가 다시 diff되어
 // 렉이 심했다. 그래서 이 경로는 dotElements를 통해 style.setProperty로 직접 쓴다.
 const WAVE_MAX_RADIUS = 6 // 파동이 도달할 수 있는 최대 반경(칸)
@@ -271,21 +283,31 @@ const RING_WIDTH_K = 1.1
 const BAND = 1.6 // 링 주변, 실제로 강도가 남는 두께(칸) — 이 폭만 스캔해 계산량을 줄인다
 const SECONDARY_OFFSET = 1.4 // 뒤따르는 2차 마루의 위상차(칸) — 파도가 다발로 보이게
 const SECONDARY_AMPLITUDE = 0.35
-const RIPPLE_MIN_INTERVAL = 50 // ms, 너무 잦은 파동 생성 방지
 const MAX_RIPPLES = 10 // 동시 파동 상한 — 프레임 비용의 천장을 고정한다
 
+// 육지 프레스: 파동처럼 퍼지지 않고 고정 반경 안에서 빠르게 강해졌다가 서서히 풀린다.
+const PRESS_RADIUS = 2.2 // 칸 — 퍼지지 않는 고정 크기
+const PRESS_DURATION = 550 // ms
+const MAX_PRESSES = 10
+
 const ripples = []
-let lastRippleTime = 0
+const presses = []
 let rafId = null
 let rafRunning = false
 let prevTouched = [] // 지난 프레임에 강도가 반영된 인덱스 — 이번 프레임에 지울 후보
+let lastActiveCol = null
+let lastActiveRow = null // 마지막으로 파동/프레스를 발생시킨 칸 — 같은 칸이면 재발생하지 않는다
 
 function spawnRipple(col, row) {
   const now = performance.now()
-  if (now - lastRippleTime < RIPPLE_MIN_INTERVAL) return
-  lastRippleTime = now
   if (ripples.length >= MAX_RIPPLES) ripples.shift()
   ripples.push({ col, row, startTime: now })
+}
+
+function spawnPress(col, row) {
+  const now = performance.now()
+  if (presses.length >= MAX_PRESSES) presses.shift()
+  presses.push({ col, row, startTime: now })
 }
 
 function ensureTicking() {
@@ -367,13 +389,53 @@ function tick(now) {
     }
   }
 
+  for (let i = presses.length - 1; i >= 0; i--) {
+    const press = presses[i]
+    const elapsedMs = now - press.startTime
+    const t = elapsedMs / PRESS_DURATION
+
+    if (t >= 1) {
+      presses.splice(i, 1)
+      continue
+    }
+
+    // 빠르게 강해졌다가(처음 15%) 서서히 풀리는(나머지 85%) 곡선 — 무거운 게 눌렀다 떼는 느낌.
+    const envelope = t < 0.15 ? t / 0.15 : Math.pow(1 - (t - 0.15) / 0.85, 1.6)
+
+    const minCol = Math.max(0, Math.floor(press.col - PRESS_RADIUS))
+    const maxCol = Math.min(cols.value - 1, Math.ceil(press.col + PRESS_RADIUS))
+    const minRow = Math.max(0, Math.floor(press.row - PRESS_RADIUS))
+    const maxRow = Math.min(rows.value - 1, Math.ceil(press.row + PRESS_RADIUS))
+    const radiusSq = PRESS_RADIUS * PRESS_RADIUS
+
+    for (let r = minRow; r <= maxRow; r++) {
+      const rowBase = r * cols.value
+      const dy2 = r - press.row
+      for (let c = minCol; c <= maxCol; c++) {
+        const idx = rowBase + c
+        if (!landMask[idx]) continue // 바다는 프레스 계산에서 제외
+
+        const dx2 = c - press.col
+        const distSq = dx2 * dx2 + dy2 * dy2
+        if (distSq > radiusSq) continue
+
+        const distance = Math.sqrt(distSq)
+        const contribution = (1 - distance / PRESS_RADIUS) * envelope
+        if (contribution <= 0.02) continue
+
+        if (frameScratch[idx] === 0) touchedThisFrame.push(idx)
+        if (contribution > frameScratch[idx]) frameScratch[idx] = contribution
+      }
+    }
+  }
+
   for (const idx of touchedThisFrame) {
     const el = dotElements[idx]
     if (el) el.style.setProperty('--intensity', frameScratch[idx])
   }
   prevTouched = touchedThisFrame
 
-  if (ripples.length > 0) needMore = true
+  if (ripples.length > 0 || presses.length > 0) needMore = true
 
   if (needMore) {
     rafId = requestAnimationFrame(tick)
@@ -395,11 +457,22 @@ function handleMouseMove(event) {
   const row = Math.floor(((event.clientY - gridRect.top) / gridRect.height) * rows.value)
 
   if (col >= 0 && col < cols.value && row >= 0 && row < rows.value) {
-    const idx = row * cols.value + col
-    if (!landMask[idx]) spawnRipple(col, row) // 육지 위 커서에서는 파동을 만들지 않는다
+    // 같은 칸에 머무는 동안은 아무 것도 새로 만들지 않는다 — 칸이 바뀔 때만 1회 반응한다.
+    if (col !== lastActiveCol || row !== lastActiveRow) {
+      lastActiveCol = col
+      lastActiveRow = row
+      const idx = row * cols.value + col
+      if (landMask[idx]) spawnPress(col, row)
+      else spawnRipple(col, row)
+    }
   }
 
   ensureTicking()
+}
+
+function handleMouseLeave() {
+  lastActiveCol = null
+  lastActiveRow = null
 }
 
 let resizeObserver = null
@@ -454,7 +527,7 @@ function handleCityHover(dot, event) {
 </script>
 
 <template>
-  <div ref="rootRef" class="korea-map" @mousemove="handleMouseMove">
+  <div ref="rootRef" class="korea-map" @mousemove="handleMouseMove" @mouseleave="handleMouseLeave">
     <div ref="viewportRef" class="korea-map__viewport">
       <div
         ref="gridRef"
@@ -527,7 +600,9 @@ function handleCityHover(dot, event) {
 
 .korea-map__dot.is-land {
   background: var(--dot-lit);
-  filter: brightness(calc(1 + var(--intensity, 0) * 0.5));
+  /* 파동과 달리 밝아지는 게 아니라 어두워지고 살짝 오그라들어 "눌리는" 느낌을 낸다. */
+  filter: brightness(calc(1 - var(--intensity, 0) * 0.4));
+  transform: scale(calc(1 - var(--intensity, 0) * 0.12));
 }
 
 .korea-map__dot.is-city {

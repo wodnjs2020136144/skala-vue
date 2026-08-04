@@ -667,6 +667,76 @@
 
 ---
 
+## 10. 파동/프레스 발생 빈도 최적화 + 데모 토글·즐겨찾기 반응성 + 배경색 수정
+
+**요구사항**
+- 바다 파동이 커서가 같은 픽셀(원) 안에서 조금만 움직여도 계속 새로 발생해 낭비가 심하니, 커서가 한 픽셀에 머무는 동안은 파동이 한 번만 나도록 해달라는 요청을 받았다.
+- 한반도 육지 픽셀에는 파동 대신 무거운 것이 지형을 누르는 느낌의 인터랙션을 원하며, 이것도 같은 픽셀에 머무는 동안 한 번만 발생해야 한다는 요청을 받았다.
+- 실제/데모 데이터 토글을 눌러도 지도 페이지의 도시 도트·팝업이 실시간으로 안 바뀐다는 버그, 상단 즐겨찾기 칩의 "지도에서 보기"를 이미 `/map`에 있는 상태에서 누르면 팝업이 안 뜨는 버그, 도트 픽셀 뒤에 깔린 원색 배경(청록색)을 자연스러운 검은색으로 바꿔달라는 요청을 함께 받았다.
+
+**사고 과정**
+- 파동/프레스를 "칸에 머무는 동안 1회"로 제한하는 방법을 고민했다. 기존엔 `mousemove`마다 시간 기준(`RIPPLE_MIN_INTERVAL` 50ms)으로만 스팸을 막았는데, 이건 "같은 칸 안에서 흔들림"과 "다른 칸으로 이동"을 구분하지 못한다. "마지막으로 반응한 칸(col,row)"을 하나만 기억해뒀다가, 새로 계산한 칸이 그것과 다를 때만 반응하는 방식이면 정확히 요구사항대로 동작하면서 코드도 단순하다고 판단했다.
+- 육지 프레스 효과를 구현하기 전 기존 파동 엔진 구조를 다시 봤는데, 파동 루프가 이미 `if (landMask[idx]) continue`로 육지를 완전히 건너뛰고 있어서 육지 도트의 `--intensity` CSS 변수와 그 값을 담는 `frameScratch`/`touchedThisFrame`/`prevTouched` 버퍼가 사실상 놀고 있었다. 육지·바다 칸은 서로 절대 겹치지 않으므로(한쪽 시스템이 건드리는 칸은 다른 쪽이 절대 안 건드림), 프레스를 위해 새 버퍼를 만들지 않고 이 기존 버퍼를 그대로 재사용하면 코드 중복 없이 같은 `tick()` 루프 안에 자연스럽게 얹을 수 있다고 봤다. "무거운 게 누른다"는 느낌은 파동과 달리 반경이 퍼지지 않는 고정 크기로, 빠르게 강해졌다가 서서히 풀리는 감쇠 곡선으로 표현하기로 했다.
+- 데모 토글 버그는 `KoreaMapDots.vue`의 `buildGrid()`가 `onMounted`/리사이즈 시에만 실행되고 `props.cities`가 나중에 바뀌는 것을 감시하지 않는다는 게 원인이라고 판단해, `watch(() => props.cities, ...)`로 부모의 배열이 통째로 바뀔 때마다 다시 그리도록 하면 될 것 같았다.
+- 즐겨찾기 팝업 버그는 `onMounted`가 `route.query.city`를 딱 한 번만 읽는 게 원인이라고 보고, `watch(() => route.query.city, ...)`를 추가하기로 했다. 다만 실제 확인 과정에서 팝업을 닫는 버튼이 자동화 브라우저에서 전혀 반응하지 않는 것처럼 보이는 현상을 발견해, 처음엔 `<Transition>`이 감시하는 `.popup-backdrop` 자신에 CSS 트랜지션이 없어서(트랜지션은 안쪽 `.weather-popup`에만 있음) `transitionend`가 감지되지 않아 leave가 영원히 끝나지 않는 버그로 의심하고 backdrop에도 트랜지션을 추가했었다. 하지만 고친 뒤에도 같은 현상이 재현돼, `document.visibilityState`가 `hidden`인 이 세션의 자동화 탭 특성상 `requestAnimationFrame`이 멈춰 있고 Vue의 `<Transition>` 클래스 전환도 내부적으로 `requestAnimationFrame`에 의존한다는 점이 진짜 원인이라고 다시 판단했다(같은 세션에서 이미 두 번 겪은 rAF 정지 문제와 같은 계열). 실제로 요청받은 증상(팝업이 "열리지" 않음)과는 무관한 곁가지였으므로, 검증되지 않은 backdrop 트랜지션 변경은 되돌리고 원래 계획했던 `route.query.city` watcher만 남겼다.
+
+**해결 과정**
+1. `src/components/practices/weather/KoreaMapDots.vue`에 `lastActiveCol`/`lastActiveRow`(마지막으로 파동·프레스를 발생시킨 칸)를 추가하고, `handleMouseMove`에서 새로 계산한 칸이 이전과 같으면 아무 것도 하지 않고, 다르면 육지/바다 여부에 따라 프레스 또는 파동을 1회만 발생시키도록 바꿨다. `.korea-map`에 `@mouseleave`를 추가해 지도를 벗어나면 추적값을 초기화해, 같은 칸에 다시 들어와도 새로 반응하게 했다.
+
+   #### `src/components/practices/weather/KoreaMapDots.vue`
+   ```js
+   if (col >= 0 && col < cols.value && row >= 0 && row < rows.value) {
+     if (col !== lastActiveCol || row !== lastActiveRow) {
+       lastActiveCol = col
+       lastActiveRow = row
+       const idx = row * cols.value + col
+       if (landMask[idx]) spawnPress(col, row)
+       else spawnRipple(col, row)
+     }
+   }
+   ```
+2. 육지 프레스를 파동과 같은 `tick()` 루프 안에 추가했다. 반경이 퍼지지 않는 고정 크기(`PRESS_RADIUS`)와, 처음 15%는 빠르게 강해지고 나머지 85%는 거듭제곱으로 서서히 풀리는 감쇠 곡선(`PRESS_DURATION` ≈ 550ms)을 썼다. 기존 `frameScratch`/`touchedThisFrame`/`prevTouched` 버퍼를 그대로 재사용해 새 자료구조를 만들지 않았다.
+
+   #### `src/components/practices/weather/KoreaMapDots.vue`
+   ```js
+   const envelope = t < 0.15 ? t / 0.15 : Math.pow(1 - (t - 0.15) / 0.85, 1.6)
+   // ...반경 안 육지 칸에 대해 (1 - distance/PRESS_RADIUS) * envelope 를
+   // 기존 frameScratch/touchedThisFrame에 그대로 합류시킨다(파동과 겹치지 않는 칸이라 안전)
+   ```
+3. 육지 도트 CSS를 밝아지는 방향에서 어두워지는 방향으로 바꾸고, 살짝 오그라드는 `transform: scale(...)`을 더해 "눌리는" 느낌을 강화했다.
+
+   #### `src/components/practices/weather/KoreaMapDots.vue`
+   ```css
+   .korea-map__dot.is-land {
+     background: var(--dot-lit);
+     filter: brightness(calc(1 - var(--intensity, 0) * 0.4));
+     transform: scale(calc(1 - var(--intensity, 0) * 0.12));
+   }
+   ```
+4. `KoreaMapDots.vue`에 `watch(() => props.cities, () => { if (!containerW || !containerH) return; buildGrid(containerW, containerH) })`를 추가해, 데모/실제 데이터 토글로 부모의 `cityList`가 교체될 때마다 그리드를 다시 그리도록 했다(줌/팬 상태는 `buildGrid`가 건드리지 않아 유지된다).
+5. `src/views/WeatherMapView.vue`에 `watch(() => route.query.city, (cityId) => { ...; selectCityById(city) })`를 추가해, 이미 `/map`에 마운트된 상태에서 즐겨찾기 칩으로 쿼리만 바뀌는 경우에도 팝업이 열리도록 했다. 최초 진입은 기존 `onMounted` 로직이 그대로 처리한다.
+6. `.weather-map`의 `background-color`를 `var(--sea)`(청록)에서 테마에 이미 있는 근접-검정 토큰 `var(--ink)`로 바꿨다.
+7. `npx vite build`로 오류 여부를 확인한 뒤, 브라우저에서 실제 도구 클릭 대신 앱 내부 `router.push`를 직접 호출해(자동화 탭의 rAF 제약과 무관하게 확인 가능한 경로) 즐겨찾기 흐름과 데모 토글 반응성을 검증했다.
+
+**트러블슈팅**
+- 문제: 항목 4를 검증하려고 팝업을 열고 닫는 흐름을 테스트하다가, 팝업 닫기 버튼을 아무리 클릭해도(좌표 클릭, `dispatchEvent`, 네이티브 `.click()` 모두) 팝업 DOM이 `opacity:0` 상태로 계속 남아있는 현상을 발견했다.
+- 원인: 처음엔 `<Transition>`이 실제로 감시하는 루트가 `.popup-backdrop`인데 트랜지션 속성은 안쪽 `.weather-popup`에만 걸려있어 `transitionend`가 감지되지 않는 CSS 구조 버그로 판단하고 `.popup-backdrop` 자신에도 트랜지션을 추가했다. 하지만 고친 뒤에도 동일하게 재현돼, 이 세션의 자동화 탭이 `document.visibilityState: 'hidden'`이라 `requestAnimationFrame`이 정지돼 있고 Vue의 `<Transition>` 클래스 전환도 내부적으로 rAF에 의존한다는 진짜 원인을 다시 확인했다(같은 세션에서 `scroll`/`wheel`, 클릭 이벤트에 이어 세 번째로 겪은 같은 계열의 제약).
+- 해결: 검증되지 않은 채 남겨두면 사용하지 않은 CSS 변경만 늘리는 셈이라, `.popup-backdrop` 트랜지션 추가는 되돌렸다. 대신 실제 요청 대상이었던 "쿼리 변경으로 팝업이 열리는지"는 앱의 `router` 인스턴스를 `document.querySelector('#app').__vue_app__`로 직접 얻어 `router.push({name:'weather-map', query:{city:...}})`를 호출하는 방식(rAF와 무관, 순수 상태 변경 확인)으로 검증해, 다른 두 도시에 대해 연달아 팝업이 정상적으로 바뀌는 것을 확인했다.
+
+**결과**
+- 파동/프레스 발생 빈도를 "칸 진입마다 1회"로 제한하는 로직과 육지용 프레스 감쇠 곡선을 Node.js로 독립 검증해, 곡선이 0→약 1(빠르게)→0(서서히)으로 정상적으로 움직임을 확인했다(rAF 의존 애니메이션 자체는 이 세션의 자동화 탭에서 시각적으로 재생되지 않는 기존 제약으로, 수치 검증으로 대체).
+- 데모/실제 데이터 토글을 지도 페이지에 머문 채로 눌러 도시 도트 배경색이 토글 직후 바로 바뀌는 것을 확인했다.
+- `/map`에 이미 있는 상태에서 `router.push`로 쿼리(`?city=...`)만 바꿔도 팝업이 즉시 열리고, 다른 도시로 다시 바꾸면 팝업 내용도 바로 갱신되는 것을 확인했다.
+- 지도 배경이 청록색에서 검은 계열로 바뀐 것을 스크린샷으로 확인했다.
+
+![Day 4 지도 — 검은 배경, 즐겨찾기로 연 팝업](./images/day4/27-map-dark-bg-favorite-popup.jpg)
+
+**느낀점**
+- "발생 빈도를 줄여달라"는 요청을 받았을 때, 계산 자체를 더 가볍게 만드는 것과 애초에 덜 자주 실행되게 만드는 것은 다른 최적화라는 걸 다시 확인했다. 이번엔 계산량은 지난 라운드에서 이미 최적화돼 있었으므로, "같은 칸이면 아예 트리거하지 않는다"는 발생 빈도 자체를 줄이는 접근이 훨씬 간단하고 효과적이었다.
+- 버그를 재현하다 자동화 도구의 한계(rAF 정지)에 부딪혔을 때, 그 자리에서 바로 "원인일 수도 있겠다"며 코드를 고치기보다 고친 뒤에도 같은 증상이 재현되는지 먼저 재확인하는 습관이 중요하다는 걸 다시 느꼈다. 고치고 나서도 증상이 그대로라면 그건 내가 고친 부분이 원인이 아니라는 뜻이고, 검증되지 않은 변경은 남겨두지 않고 되돌리는 게 맞다.
+
+---
+
 <!--
 아래 형식을 복사해서 작업 단위마다 항목을 추가합니다.
 
