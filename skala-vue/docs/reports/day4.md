@@ -812,6 +812,72 @@
 
 ---
 
+## 13. 팝업 위치 보정 + 즐겨찾기·온도 TOP3 사이드 패널 + 바다·주요지역 픽셀 밀도 개선
+
+**요구사항**
+- 팝업을 줄였는데도 여전히 화면 아래쪽으로 치우쳐 뜬다는 피드백을 받아, 위치를 다시 조정해달라는 요청을 받았다.
+- 이전에 계획 단계로만 남겨뒀던 "지도 페이지 좌우 컨텐츠" 브레인스토밍 중 후보 A(즐겨찾기 미니 카드 + 온도 TOP3 랭킹)를 실제로 구현해달라는 요청을 받았다.
+- 지난 라운드에 한반도 육지에 적용한 "자기 색보다 진한 box-shadow로 칸 사이 간격을 메워 하나의 영역처럼 보이게 하는" 기법을, 바다와 주요 지역(도시) 픽셀에도 똑같이 적용해 꽉 찬 느낌을 내달라는 요청을 받았다.
+
+**사고 과정**
+- 팝업 위치 문제의 원인을 다시 짚어보니, "클릭 지점 아래로 열고 공간이 부족할 때만 위로 뒤집는다"는 분기 로직 자체가 문제였다. 도시 도트 대부분이 한반도 지형상 화면 중하단에 몰려 있어 이 로직은 거의 항상 "아래로 열기"를 택하고, 화면 하단 클램프에 걸려 계속 아래쪽에 붙어 보였다. 클릭 위치를 기준으로 위/아래를 판단하는 대신, **클릭 지점을 팝업의 세로 중심으로 삼고 화면 안에 들어오도록 클램프**하면 클릭 위치와 무관하게 항상 고르게 화면 안에 들어온다는 훨씬 단순한 규칙으로 바꿀 수 있다고 판단했다.
+- 사이드 패널은 별도 컴포넌트 파일을 만들지 않고 `WeatherMapView.vue` 안에 직접 구성하기로 했다 — 지도 페이지 전용 UI라 다른 곳에서 재사용할 일이 없어서, 파일을 분리하면 오히려 props를 주고받는 코드만 늘어난다고 봤다(CLAUDE.md의 "일회성 코드를 위해 추상화 계층을 만들지 않는다" 원칙과도 맞음). 즐겨찾기 목록은 `favoritesStore`+`cityList`(실시간 날씨 포함)를 조합하면 되고, TOP3 랭킹은 `WeatherHomeView.vue`에 이미 있던 `hottestCity`/`coldestCity`(1개만 뽑는 `reduce`) 패턴을 정렬 후 `slice(0,3)`으로 확장하면 되는, 기존 코드 재사용 비중이 큰 구현이라고 판단했다.
+- 바다·도시 픽셀 밀도 개선은 지난 라운드 육지 처리와 완전히 같은 원리라 새로 고민할 부분은 적었다. 다만 도시 도트는 이미 인라인으로 `--pulse-color`(호버 강조색)를 받고 있어서, 여기에 `--marker-color`(마커 자체색)를 하나 더 얹어 CSS에서 그대로 box-shadow 색으로 쓰면 됐다. 도시는 이미 자기 색으로 눈에 띄는 데다 여러 개가 다닥다닥 붙어있지 않은 경우가 많아, 육지(2px)와 똑같은 두께를 주면 평상시 크기가 커 보일 위험이 있다고 보고 1px로 더 얇게 뒀다.
+
+**해결 과정**
+1. `src/views/WeatherMapView.vue`의 `selectCity`/`selectCityById`가 `popupAnchor`에 `top`/`bottom` 대신 `centerY`(세로 중심)를 저장하도록 바꾸고, `popupStyle`도 위/아래 분기 없이 `centerY - 팝업높이/2`를 화면 안으로 클램프하는 방식으로 단순화했다. `POPUP_HEIGHT_ESTIMATE`도 실제 축소된 팝업 높이에 맞춰 560 → 480으로, `.weather-popup`의 `max-height`도 520px로 다시 보정했다.
+
+   #### `src/views/WeatherMapView.vue`
+   ```js
+   const popupStyle = computed(() => {
+     if (!popupAnchor.value) return {}
+     const { left, centerY } = popupAnchor.value
+     const clampedLeft = Math.max(POPUP_MARGIN, Math.min(left, window.innerWidth - POPUP_WIDTH - POPUP_MARGIN))
+     const rawTop = centerY - POPUP_HEIGHT_ESTIMATE / 2
+     const clampedTop = Math.max(POPUP_MARGIN, Math.min(rawTop, window.innerHeight - POPUP_HEIGHT_ESTIMATE - POPUP_MARGIN))
+     return { left: `${clampedLeft}px`, top: `${clampedTop}px` }
+   })
+   ```
+2. `.weather-map__grid-area`를 감싸는 `.weather-map__body`(flex row)를 새로 두고, 왼쪽엔 즐겨찾기 목록, 오른쪽엔 온도 TOP3(더움/추움) 랭킹을 배치했다. 둘 다 항목을 클릭하면 기존 `selectCityById`로 팝업이 뜨고, 온도는 `convertTemp()`로 ℃/℉ 전환을 반영한다.
+
+   #### `src/views/WeatherMapView.vue`
+   ```js
+   const favoriteCitiesWithWeather = computed(() =>
+     cityList.value.filter((city) => favoritesStore.isFavorite(city.id)),
+   )
+   const hottestThree = computed(() => [...cityList.value].sort((a, b) => b.temp - a.temp).slice(0, 3))
+   const coldestThree = computed(() => [...cityList.value].sort((a, b) => a.temp - b.temp).slice(0, 3))
+   ```
+3. 좁은 화면(1000px 이하)에서는 지도가 눌리지 않도록 사이드 패널을 숨기는 미디어쿼리를 추가했다.
+4. `src/components/practices/weather/KoreaMapDots.vue`의 기본 `.korea-map__dot`(바다) 규칙에 자기 배경색과 같은 `box-shadow: 0 0 0 2px #7cc0cb`를 추가해 바다도 육지처럼 격자 간격 없이 꽉 찬 면으로 보이게 했고, 도시 도트에는 인라인으로 넘긴 `--marker-color`를 이용해 `box-shadow: 0 0 0 1px var(--marker-color, var(--amber))`를 적용했다.
+
+   #### `src/components/practices/weather/KoreaMapDots.vue`
+   ```css
+   .korea-map__dot {
+     background: #7cc0cb;
+     box-shadow: 0 0 0 2px #7cc0cb; /* 바다도 육지처럼 꽉 찬 면으로 */
+   }
+   .korea-map__dot.is-city {
+     box-shadow: 0 0 0 1px var(--marker-color, var(--amber));
+   }
+   ```
+5. `npx vite build`로 오류 여부를 확인했다.
+
+**트러블슈팅**
+- 문제: 이번 라운드는 Chrome 확장(브라우저 자동화 도구)이 세션 내내 연결되지 않아 실제 브라우저에서 스크린샷·클릭 검증을 하지 못했다.
+- 원인: 확장 프로그램 연결 문제로 추정되며, 재시도(수 차례, 간격을 두고)해도 계속 "확장 프로그램 연결 안 됨" 상태였다.
+- 해결: 대신 (1) `npx vite build`로 템플릿·스크립트 컴파일 오류가 없는지, (2) 개발 서버에 떠 있는 상태에서 수정한 세 파일(`WeatherMapView.vue`, `KoreaMapDots.vue`, `WeatherStatsPanel.vue`) 각각을 직접 요청해 Vite가 200으로 정상 컴파일·서빙하는지(컴파일 에러가 있으면 500이나 오버레이 스크립트가 온다), (3) 코드를 다시 훑어 로직을 재검증하는 방식으로 확인을 대신했다. 다만 이 방식으로는 **실제 화면에서 팝업 위치·사이드 패널 레이아웃·픽셀 밀도가 의도대로 보이는지는 확인하지 못했다** — 사용자가 직접 화면에서 확인해줘야 한다.
+
+**결과**
+- 빌드 통과, 수정한 3개 파일 모두 Vite가 정상 컴파일·서빙함을 확인했다.
+- (브라우저 자동화 도구 연결 불가로 시각적 확인은 다음에 사용자가 직접 확인 필요) 코드상으로는: 팝업이 클릭 위치를 중심으로 화면 안에 클램프되어 열리도록, 왼쪽엔 즐겨찾기·오른쪽엔 온도 TOP3 패널이 클릭 시 `selectCityById`를 호출하도록, 바다·도시 도트에 각각 box-shadow 밀도 처리가 적용되도록 구현했다.
+
+**느낀점**
+- 팝업 위치를 "조건 분기로 위/아래를 고르는" 방식에서 "중심점 + 클램프"로 바꾸면서, 분기 로직이 늘어나던 이전 방식보다 코드가 더 짧아지면서 오히려 더 안정적으로 동작하는 경우가 있다는 걸 다시 느꼈다. 조건을 늘려 특수 케이스를 처리하기보다, 애초에 특수 케이스가 생기지 않는 더 단순한 규칙을 찾는 게 나을 때가 많다.
+- 이번엔 평소 쓰던 브라우저 자동화 검증을 못 쓰는 상황을 처음 겪었는데, "검증 도구가 없다고 검증을 포기하는" 대신 빌드·모듈 서빙 확인처럼 지금 가능한 다른 방식으로 확인 범위를 최대한 좁혀두고, 확인하지 못한 부분은 명확히 사용자에게 알리는 게 맞다고 판단했다. 안 되는 걸 억지로 되는 척하지 않는 태도가 중요하다고 다시 느꼈다.
+
+---
+
 <!--
 아래 형식을 복사해서 작업 단위마다 항목을 추가합니다.
 

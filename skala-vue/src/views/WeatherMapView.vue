@@ -9,6 +9,7 @@ import { CITY_LIST, fetchCurrentWeather, getDummyWeather } from '../services/wea
 import KoreaMapDots from '../components/practices/weather/KoreaMapDots.vue'
 import FavoriteHeartDots from '../components/practices/weather/FavoriteHeartDots.vue'
 import WeatherStatsPanel from '../components/practices/weather/WeatherStatsPanel.vue'
+import DotMatrixIcon from '../components/practices/weather/DotMatrixIcon.vue'
 import UnitToggler from '../components/UnitToggler.vue'
 
 const route = useRoute()
@@ -82,21 +83,37 @@ const displayTemp = computed(() => {
     : selectedCity.value.temp
 })
 
+// 사이드 패널(즐겨찾기·순위)의 온도 표시도 ℃/℉ 전환을 반영한다.
+function convertTemp(celsius) {
+  return configStore.unit === 'imperial' ? Math.round((celsius * 9) / 5 + 32) : celsius
+}
+
+// 왼쪽 패널 — 즐겨찾기한 도시를 실시간 날씨(cityList)에서 찾아 보여준다.
+const favoriteCitiesWithWeather = computed(() =>
+  cityList.value.filter((city) => favoritesStore.isFavorite(city.id)),
+)
+
+// 오른쪽 패널 — 온도 기준 TOP3. WeatherHomeView의 hottestCity/coldestCity와 같은 계산을
+// 3개까지 확장한 것이다.
+const hottestThree = computed(() => [...cityList.value].sort((a, b) => b.temp - a.temp).slice(0, 3))
+const coldestThree = computed(() => [...cityList.value].sort((a, b) => a.temp - b.temp).slice(0, 3))
+
 const POPUP_WIDTH = 320
-const POPUP_HEIGHT_ESTIMATE = 560
+const POPUP_HEIGHT_ESTIMATE = 480
 const POPUP_MARGIN = 12
 
-// 클릭 위치 근처, 화면 밖으로 넘치지 않게 top/left를 모두 clamp한 팝업 좌표.
+// 클릭 지점(또는 화면 중앙)을 팝업의 세로 중심으로 두고, 화면 안에 완전히 들어오도록
+// top/left를 모두 clamp한다. 도시 도트 대부분이 한반도 지형상 화면 중하단에 몰려 있어
+// "아래로 열고 공간 없으면 위로 뒤집는" 방식은 거의 항상 아래쪽에 붙어 보이는 문제가
+// 있었다 — 중심 기준으로 잡으면 클릭 위치와 무관하게 항상 화면 안에 고르게 들어온다.
 // 모바일 폭에서는 CSS가 중앙 고정으로 덮어쓴다.
 const popupStyle = computed(() => {
   if (!popupAnchor.value) return {}
-  const { left, top, bottom } = popupAnchor.value
+  const { left, centerY } = popupAnchor.value
   const maxLeft = window.innerWidth - POPUP_WIDTH - POPUP_MARGIN
   const clampedLeft = Math.max(POPUP_MARGIN, Math.min(left, maxLeft))
 
-  const spaceBelow = window.innerHeight - bottom
-  const opensUpward = spaceBelow < POPUP_HEIGHT_ESTIMATE + POPUP_MARGIN && top > POPUP_HEIGHT_ESTIMATE
-  const rawTop = opensUpward ? top - POPUP_HEIGHT_ESTIMATE - 8 : bottom + 8
+  const rawTop = centerY - POPUP_HEIGHT_ESTIMATE / 2
   const maxTop = window.innerHeight - POPUP_HEIGHT_ESTIMATE - POPUP_MARGIN
   const clampedTop = Math.max(POPUP_MARGIN, Math.min(rawTop, maxTop))
 
@@ -105,16 +122,14 @@ const popupStyle = computed(() => {
 
 function selectCity({ city, rect }) {
   selectedId.value = city.id
-  popupAnchor.value = { left: rect.left, top: rect.top, bottom: rect.bottom }
+  popupAnchor.value = { left: rect.left, centerY: (rect.top + rect.bottom) / 2 }
 }
 
 function selectCityById(city) {
   selectedId.value = city.id
-  const centerTop = window.innerHeight / 2 - POPUP_HEIGHT_ESTIMATE / 2
   popupAnchor.value = {
     left: window.innerWidth / 2 - POPUP_WIDTH / 2,
-    top: centerTop,
-    bottom: centerTop,
+    centerY: window.innerHeight / 2,
   }
 }
 
@@ -131,8 +146,53 @@ function closePopup() {
     <p v-else-if="loadError" class="status-message status-message--error">{{ loadError }}</p>
 
     <template v-else>
-      <div class="weather-map__grid-area">
-        <KoreaMapDots :cities="cityList" :selected-id="selectedId" @select-city="selectCity" />
+      <div class="weather-map__body">
+        <aside class="weather-map__side">
+          <h2 class="weather-map__side-title">⭐ 즐겨찾기</h2>
+          <button
+            v-for="city in favoriteCitiesWithWeather"
+            :key="city.id"
+            class="weather-map__side-item"
+            @click="selectCityById(city)"
+          >
+            <DotMatrixIcon :condition="city.condition" size="sm" :animated="false" />
+            <span class="weather-map__side-name">{{ city.name }}</span>
+            <span class="weather-map__side-temp">{{ convertTemp(city.temp) }}°</span>
+          </button>
+          <p v-if="favoriteCitiesWithWeather.length === 0" class="weather-map__side-empty">
+            즐겨찾기한 도시가 없어요
+          </p>
+        </aside>
+
+        <div class="weather-map__grid-area">
+          <KoreaMapDots :cities="cityList" :selected-id="selectedId" @select-city="selectCity" />
+        </div>
+
+        <aside class="weather-map__side">
+          <h2 class="weather-map__side-title">오늘의 순위</h2>
+          <p class="weather-map__side-subtitle">🔥 가장 더운 지역</p>
+          <button
+            v-for="(city, index) in hottestThree"
+            :key="city.id"
+            class="weather-map__side-item"
+            @click="selectCityById(city)"
+          >
+            <span class="weather-map__side-rank">{{ index + 1 }}</span>
+            <span class="weather-map__side-name">{{ city.name }}</span>
+            <span class="weather-map__side-temp">{{ convertTemp(city.temp) }}°</span>
+          </button>
+          <p class="weather-map__side-subtitle">🧊 가장 추운 지역</p>
+          <button
+            v-for="(city, index) in coldestThree"
+            :key="city.id"
+            class="weather-map__side-item"
+            @click="selectCityById(city)"
+          >
+            <span class="weather-map__side-rank">{{ index + 1 }}</span>
+            <span class="weather-map__side-name">{{ city.name }}</span>
+            <span class="weather-map__side-temp">{{ convertTemp(city.temp) }}°</span>
+          </button>
+        </aside>
       </div>
 
       <Transition name="popup">
@@ -176,10 +236,102 @@ function closePopup() {
   will-change: filter;
 }
 
+.weather-map__body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
 .weather-map__grid-area {
   position: relative;
   flex: 1;
   min-height: 0;
+}
+
+/* 좌우 사이드 패널 — 즐겨찾기 / 온도 TOP3 순위 */
+.weather-map__side {
+  flex: 0 0 220px;
+  width: 220px;
+  padding: 16px 12px;
+  background: var(--ink);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.weather-map__side-title {
+  margin: 0 0 8px;
+  font-family: var(--font-pixel-kr);
+  font-size: 14px;
+  color: var(--amber);
+  letter-spacing: 0.05em;
+}
+
+.weather-map__side-subtitle {
+  margin: 12px 0 4px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--paper);
+  opacity: 0.7;
+}
+
+.weather-map__side-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 8px;
+  padding: 6px 8px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.weather-map__side-item:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.weather-map__side-rank {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--amber);
+  color: var(--ink);
+  font-family: var(--font-pixel);
+  font-size: 10px;
+}
+
+.weather-map__side-name {
+  flex: 1;
+  font-family: var(--font-pixel-kr);
+  font-size: 12px;
+  color: var(--paper);
+}
+
+.weather-map__side-temp {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--amber);
+}
+
+.weather-map__side-empty {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--paper);
+  opacity: 0.6;
+}
+
+/* 좁은 화면에서는 지도가 눌리지 않도록 사이드 패널을 숨긴다 */
+@media (max-width: 1000px) {
+  .weather-map__side {
+    display: none;
+  }
 }
 
 @keyframes sea-shimmer {
@@ -213,7 +365,7 @@ function closePopup() {
 .weather-popup {
   position: fixed;
   width: 320px;
-  max-height: min(560px, calc(100vh - 24px));
+  max-height: min(520px, calc(100vh - 24px));
   overflow-y: auto;
   background: var(--paper);
   border-radius: 16px;
