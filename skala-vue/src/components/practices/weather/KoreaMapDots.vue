@@ -130,6 +130,8 @@ const tooltipPos = ref({ left: 0, top: 0 })
 // landMask: 육지 여부(파동은 여기를 건너뛴다), frameScratch: 이번 프레임 강도.
 let landMask = new Uint8Array(0)
 let frameScratch = new Float32Array(0)
+// burst(선택 폭발) 전용 버퍼 — 파동/프레스와 달리 육지·바다 구분 없이 모든 칸에 적용된다.
+let burstScratch = new Float32Array(0)
 
 function buildGrid(width, height) {
   const newCols = Math.max(1, Math.round(width / DOT_PX))
@@ -178,7 +180,9 @@ function buildGrid(width, height) {
   dots.value = newDots
   landMask = newLandMask
   frameScratch = new Float32Array(cellCount)
+  burstScratch = new Float32Array(cellCount)
   prevTouched = []
+  prevBurstTouched = []
   refreshDotElements()
 }
 
@@ -303,11 +307,20 @@ const PRESS_RADIUS = 2.2 // 칸 — 퍼지지 않는 고정 크기
 const PRESS_DURATION = 550 // ms
 const MAX_PRESSES = 10
 
+// 지역 선택 시 클릭한 픽셀에서 터지는 충격파. 파동/프레스와 달리 육지·바다를 가리지 않고
+// 모든 칸에 적용되며, 짧고 강하게 퍼졌다 빠르게 사그라든다.
+const BURST_MAX_RADIUS = 5.5 // 칸
+const BURST_DURATION = 480 // ms
+const BURST_BAND = 1.4 // 링 주변 실제로 강도가 남는 두께(칸)
+const MAX_BURSTS = 6
+
 const ripples = []
 const presses = []
+const bursts = []
 let rafId = null
 let rafRunning = false
 let prevTouched = [] // 지난 프레임에 강도가 반영된 인덱스 — 이번 프레임에 지울 후보
+let prevBurstTouched = []
 let lastActiveCol = null
 let lastActiveRow = null // 마지막으로 파동/프레스를 발생시킨 칸 — 같은 칸이면 재발생하지 않는다
 
@@ -321,6 +334,13 @@ function spawnPress(col, row) {
   const now = performance.now()
   if (presses.length >= MAX_PRESSES) presses.shift()
   presses.push({ col, row, startTime: now })
+}
+
+function spawnBurst(col, row) {
+  const now = performance.now()
+  if (bursts.length >= MAX_BURSTS) bursts.shift()
+  bursts.push({ col, row, startTime: now })
+  ensureTicking()
 }
 
 function ensureTicking() {
@@ -351,8 +371,14 @@ function tick(now) {
     const el = dotElements[idx]
     if (el) el.style.removeProperty('--intensity')
   }
+  for (const idx of prevBurstTouched) {
+    burstScratch[idx] = 0
+    const el = dotElements[idx]
+    if (el) el.style.removeProperty('--burst')
+  }
 
   const touchedThisFrame = []
+  const burstTouchedThisFrame = []
 
   for (let i = ripples.length - 1; i >= 0; i--) {
     const ripple = ripples[i]
@@ -442,13 +468,62 @@ function tick(now) {
     }
   }
 
+  for (let i = bursts.length - 1; i >= 0; i--) {
+    const burst = bursts[i]
+    const elapsedMs = now - burst.startTime
+    const t = elapsedMs / BURST_DURATION
+
+    if (t >= 1) {
+      bursts.splice(i, 1)
+      continue
+    }
+
+    // 순간적으로 강했다가 빠르게 사그라들고(envelope), 초반에 확 퍼졌다가 점점 감속하며
+    // 퍼져나간다(ringRadius) — "펑" 하고 터지는 충격파 느낌.
+    const envelope = (1 - t) * (1 - t)
+    const ringRadius = BURST_MAX_RADIUS * Math.sqrt(t)
+
+    const reach = ringRadius + BURST_BAND
+    const minCol = Math.max(0, Math.floor(burst.col - reach))
+    const maxCol = Math.min(cols.value - 1, Math.ceil(burst.col + reach))
+    const minRow = Math.max(0, Math.floor(burst.row - reach))
+    const maxRow = Math.min(rows.value - 1, Math.ceil(burst.row + reach))
+    const bandInnerSq = Math.max(0, ringRadius - BURST_BAND) ** 2
+    const bandOuterSq = reach * reach
+
+    for (let r = minRow; r <= maxRow; r++) {
+      const rowBase = r * cols.value
+      const dy2 = r - burst.row
+      for (let c = minCol; c <= maxCol; c++) {
+        const idx = rowBase + c
+        // 파동/프레스와 달리 육지·바다를 가리지 않는다 — 폭발이니까 전부 적용.
+        const dx2 = c - burst.col
+        const distSq = dx2 * dx2 + dy2 * dy2
+        if (distSq > bandOuterSq || distSq < bandInnerSq) continue
+
+        const distance = Math.sqrt(distSq)
+        const contribution = Math.max(0, 1 - Math.abs(distance - ringRadius) / BURST_BAND) * envelope
+        if (contribution <= 0.02) continue
+
+        if (burstScratch[idx] === 0) burstTouchedThisFrame.push(idx)
+        if (contribution > burstScratch[idx]) burstScratch[idx] = contribution
+      }
+    }
+  }
+
   for (const idx of touchedThisFrame) {
     const el = dotElements[idx]
     if (el) el.style.setProperty('--intensity', frameScratch[idx])
   }
   prevTouched = touchedThisFrame
 
-  if (ripples.length > 0 || presses.length > 0) needMore = true
+  for (const idx of burstTouchedThisFrame) {
+    const el = dotElements[idx]
+    if (el) el.style.setProperty('--burst', burstScratch[idx])
+  }
+  prevBurstTouched = burstTouchedThisFrame
+
+  if (ripples.length > 0 || presses.length > 0 || bursts.length > 0) needMore = true
 
   if (needMore) {
     rafId = requestAnimationFrame(tick)
@@ -523,8 +598,9 @@ onUnmounted(() => {
   if (rafId) cancelAnimationFrame(rafId)
 })
 
-function handleCityDotClick(city, event) {
-  emit('select-city', { city, rect: event.currentTarget.getBoundingClientRect() })
+function handleCityDotClick(dot, event) {
+  spawnBurst(dot.col, dot.row)
+  emit('select-city', { city: dot.city, rect: event.currentTarget.getBoundingClientRect() })
 }
 
 function handleCityHover(dot, event) {
@@ -571,7 +647,7 @@ function handleCityHover(dot, event) {
           "
           @mouseenter="dot.city && handleCityHover(dot, $event)"
           @mouseleave="hoveredDot = null"
-          @click="dot.city && handleCityDotClick(dot.city, $event)"
+          @click="dot.city && handleCityDotClick(dot, $event)"
         />
       </div>
     </div>
@@ -610,9 +686,12 @@ function handleCityHover(dot, event) {
   width: 100%;
   height: 100%;
   border-radius: 50%;
-  /* 완전히 평평한 단색 도트. 파동이 지나갈 때만 밝기(filter)로 색이 밝아진다 — 그림자/그러데이션 없음. */
-  background: #7cc0cb;
-  filter: brightness(calc(1 + var(--intensity, 0) * 0.9));
+  /* 완전히 평평한 단색 도트. 파동이 지나갈 때는 단순히 밝아지는 게 아니라 육지 픽셀에 쓰는
+     크림 화이트(--dot-lit)와 섞여, 물결이 반짝이는 "윤슬"처럼 보이게 한다. */
+  background: #7cc0cb; /* color-mix 미지원 환경 폴백 */
+  background-color: color-mix(in srgb, var(--dot-lit) calc(var(--intensity, 0) * 100%), #7cc0cb);
+  transform: scale(calc(1 + var(--burst, 0) * 0.8));
+  filter: brightness(calc(1 + var(--burst, 0) * 1.2));
   /* 자기 배경색보다 약 15% 어둡게 계산한 box-shadow로 칸 사이 격자 간격을 메워, 바다가
      빈틈없이 꽉 찬 하나의 면처럼 보이게 한다(육지의 영역 구분 기법과 같은 원리). 배경과
      완전히 같은 색이면 테두리가 안 보여서, 육지처럼 한 단계 진하게 뒀다. */
@@ -621,9 +700,10 @@ function handleCityHover(dot, event) {
 
 .korea-map__dot.is-land {
   background: var(--dot-lit);
-  /* 파동과 달리 밝아지는 게 아니라 어두워지고 살짝 오그라들어 "눌리는" 느낌을 낸다. */
-  filter: brightness(calc(1 - var(--intensity, 0) * 0.4));
-  transform: scale(calc(1 - var(--intensity, 0) * 0.12));
+  /* 프레스는 어두워지고 오그라들고, burst(선택 이펙트)는 반대로 밝아지며 부풀어 오른다 —
+     둘 다 같은 도트에서 동시에 일어날 수 있어 한 식에서 합성한다. */
+  filter: brightness(calc(1 - var(--intensity, 0) * 0.4 + var(--burst, 0) * 1.2));
+  transform: scale(calc(1 - var(--intensity, 0) * 0.12 + var(--burst, 0) * 0.8));
   /* 배경(바다) 원색과 구분되도록, 육지색보다 약 14% 어둡게 계산한 색으로 칸 사이 간격까지
      둘러 인접한 육지 칸끼리 하나의 영역처럼 이어붙게 한다. */
   box-shadow: 0 0 0 2px #d1cabb;
@@ -635,10 +715,10 @@ function handleCityHover(dot, event) {
   cursor: pointer;
   transition: transform 0.15s ease;
   /* 육지·바다처럼 도시도 꽉 찬 느낌을 내되, 자기 색 그대로면 배경과 구분이 안 돼 마커색을
-     15% 어둡게 계산한 --marker-border-color를 쓴다(은은하게 보이도록 육지보다 얇게 1px).
+     15% 어둡게 계산한 --marker-border-color를 쓴다. 두께는 바다(2px)·육지(2px)와 통일했다.
      is-land와 동시에 걸리는 경우(도시는 대부분 육지 위)가 많아, 같은 특이도의 이 규칙이
      스타일시트 순서상 나중이라 자동으로 우선 적용된다. */
-  box-shadow: 0 0 0 1px var(--marker-border-color, var(--amber));
+  box-shadow: 0 0 0 2px var(--marker-border-color, var(--amber));
 }
 
 /* 평상시엔 주변 지형 도트와 완전히 같은 크기 — 확대·글로우·펄스는 호버했을 때만 나타난다. */
@@ -761,6 +841,12 @@ function handleCityHover(dot, event) {
   .korea-map__dot.is-condition-rain::before {
     animation: none !important;
     opacity: 0 !important;
+  }
+
+  .korea-map__dot,
+  .korea-map__dot.is-land {
+    transform: none !important;
+    filter: none !important;
   }
 }
 

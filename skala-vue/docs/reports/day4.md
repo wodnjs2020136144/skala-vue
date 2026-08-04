@@ -939,6 +939,90 @@
 
 ---
 
+## 15. 팝업 완전 표시(fit-scale) + 바다 윤슬 + 선택 폭발 이펙트 + 테두리 두께 통일 + 픽셀 아이콘
+
+**요구사항**
+- 팝업이 스크롤 없이 전체가 뜨도록, 어떤 창 크기에서도 잘리지 않게 위치가 자동 조절되어야 한다.
+- 바다 픽셀의 파동 색상을 청록이 밝아지는 것이 아니라 흰색 계열(빈티지 색감과 어울리는 윤슬)로 바꾼다.
+- 지역을 선택할 때 해당 픽셀이 터지는 듯한 이펙트를 추가한다.
+- 도시(주요 지역) 픽셀 테두리 두께를 바다·한반도 지형 픽셀과 동일하게 맞춘다.
+- 즐겨찾기/오늘의 순위 제목의 기본 이모지(⭐🔥🧊)를 없애고, 즐겨찾기는 기존 하트 픽셀을, 더운/추운 지역은 새로 픽셀로 구현한 아이콘을 쓴다.
+
+**사고 과정**
+- 팝업은 지난 라운드(14번)에서 "어림값 대신 실측"으로 위치 계산의 어긋남 문제는 해결했지만, 높이 자체에 상한이 없어 창이 작으면 여전히 내부 스크롤이 생겼다. 근본적으로 "위치만 조정"해서는 풀리지 않는 문제라, 실측한 높이가 화면보다 크면 **팝업 전체를 비율대로 축소(scale)**해서 항상 한 화면에 다 들어오게 하는 쪽으로 접근을 바꿨다. 다만 기존 등장/퇴장 트랜지션도 같은 엘리먼트에서 `scale(0.9)`를 쓰고 있어서, 두 스케일이 한 엘리먼트에서 충돌하면 실측(`offsetHeight`)이 트랜지션 도중 값에 흔들릴 수 있다고 판단해 바깥(`.weather-popup`, 위치+fit-scale)과 안쪽(`.weather-popup__inner`, 콘텐츠+트랜지션) 두 겹으로 나눴다. 또 팝업이 열려 있는 동안 창 크기가 바뀌는 경우까지 요구사항의 "어떤 창 크기든"에 포함된다고 보고, 마지막으로 연 좌표를 기억해뒀다가 `resize` 이벤트에서 재계산하도록 추가했다.
+- 파동 색은 기존에 `filter: brightness()`로 청록을 밝히기만 해서 "밝은 청록"이었지 흰빛이 아니었다. 새 색을 만들지 않고 이미 팔레트에 있는 `--dot-lit`(육지 픽셀에 쓰는 크림 화이트, `#f3ebd9`)을 그대로 재사용하면 전체 빈티지 색감과 자연스럽게 어울릴 거라 판단했다. `filter`가 아니라 `color-mix()`로 바다색과 크림 화이트를 강도(intensity)만큼 섞는 방식을 택했다 — 밝기만 올리는 것보다 실제로 "흰 물결이 이는" 것처럼 보인다.
+- 선택 시 터지는 이펙트는 완전히 새 애니메이션 루프를 만들지 않고, 이미 있는 파동/프레스용 rAF 파이프라인(`tick()`)에 세 번째 효과(`bursts`)로 얹는 게 가장 자연스럽다고 봤다. 파동/프레스는 각각 바다/육지 한쪽에만 적용되지만, "터지는" 이펙트는 클릭한 지점이 육지 위 도시든 근처 바다든 상관없이 나야 하므로 landMask 필터링을 하지 않는 별도 버퍼(`burstScratch`)로 분리했다. 곡선은 프레스와 달리 "펑" 하고 순간적으로 강했다가 빠르게 사그라드는 형태(제곱 감쇠 envelope)에, 링 반경은 처음에 빠르게 퍼졌다가 감속하는(`sqrt(t)`) 충격파 형태로 잡았다.
+- 테두리 두께 통일은 지난 라운드에 "도시는 은은하게 보이도록 육지보다 얇게 1px"라고 의도적으로 다르게 뒀던 것을, 이번 요구사항으로 명시적으로 통일해달라고 해서 2px로 맞췄다 — 디자인 의도 변경이므로 주석도 함께 갱신했다.
+- 이모지 교체는 구글 폰트(아이콘 폰트)를 새로 불러오는 방안도 후보였지만, 외부 폰트 의존이 늘고 이미 프로젝트에 픽셀 패턴 방식(`FavoriteHeartDots.vue`, 7×7 격자)이 있어 그 패턴을 그대로 재사용/복제하는 게 더 일관적이라고 판단했다. 즐겨찾기는 기존 컴포넌트를 그대로 재사용(요구사항이 명시한 "우리가 구현한 하트 픽셀"), 불꽃/눈송이는 같은 구조의 신규 컴포넌트(`PixelTempIcon.vue`)로 만들었다.
+
+**해결 과정**
+1. `src/views/WeatherMapView.vue`의 `positionPopupAt`을 확장해, 실측한 팝업 크기가 화면보다 크면 `MIN_FIT_SCALE`(0.7)까지 축소하는 `fitScale`을 계산하고 `--fit-scale` CSS 변수로 넘기도록 바꿨다. 팝업이 열린 채 창이 리사이즈되면 마지막 중심 좌표로 다시 계산한다.
+
+   #### `src/views/WeatherMapView.vue`
+   ```js
+   const MIN_FIT_SCALE = 0.7
+   let lastPopupCenter = null
+
+   async function positionPopupAt(centerX, centerY) {
+     lastPopupCenter = { x: centerX, y: centerY }
+     await nextTick()
+     const el = popupRef.value
+     if (!el) return
+     const rawH = el.offsetHeight
+     const rawW = el.offsetWidth
+     const availH = window.innerHeight - POPUP_MARGIN * 2
+     const availW = window.innerWidth - POPUP_MARGIN * 2
+     const fitScale = Math.max(MIN_FIT_SCALE, Math.min(1, availH / rawH, availW / rawW))
+     const h = rawH * fitScale
+     const w = rawW * fitScale
+     const left = Math.max(POPUP_MARGIN, Math.min(centerX - w / 2, window.innerWidth - w - POPUP_MARGIN))
+     const top = Math.max(POPUP_MARGIN, Math.min(centerY - h / 2, window.innerHeight - h - POPUP_MARGIN))
+     popupPosition.value = { left: `${left}px`, top: `${top}px`, '--fit-scale': fitScale }
+   }
+
+   function handleWindowResize() {
+     if (!lastPopupCenter) return
+     positionPopupAt(lastPopupCenter.x, lastPopupCenter.y)
+   }
+   ```
+   템플릿도 `.weather-popup`(위치+fit-scale, `ref="popupRef"`)과 `.weather-popup__inner`(콘텐츠+트랜지션)로 나누고, CSS의 `max-height: min(520px, ...)` 하드 캡을 제거했다.
+2. `src/components/practices/weather/KoreaMapDots.vue`의 바다 도트 배경을 `filter: brightness()`에서 `color-mix()` 기반으로 바꿔, 강도가 오를수록 청록에서 크림 화이트로 섞이게 했다.
+
+   #### `src/components/practices/weather/KoreaMapDots.vue`
+   ```css
+   .korea-map__dot {
+     background: #7cc0cb; /* color-mix 미지원 환경 폴백 */
+     background-color: color-mix(in srgb, var(--dot-lit) calc(var(--intensity, 0) * 100%), #7cc0cb);
+   }
+   ```
+3. 같은 파일에 `bursts` 배열과 `burstScratch` 버퍼, `spawnBurst(col, row)`를 추가하고 `tick()` 안에 파동/프레스와 같은 형태의 burst 처리 루프를 넣었다. `handleCityDotClick`이 클릭된 도시의 `dot.col/row`로 `spawnBurst`를 호출하도록 시그니처를 `(city, event)`에서 `(dot, event)`로 바꿨다.
+
+   ```js
+   const envelope = (1 - t) * (1 - t)
+   const ringRadius = BURST_MAX_RADIUS * Math.sqrt(t)
+   // ...링 안쪽 좁은 밴드만 스캔해 burstScratch에 기록, 육지/바다 구분 없이 적용
+   ```
+   `--burst` CSS 변수를 도트에 부여해, 바다는 `transform: scale(1 + burst*0.8)` + `filter: brightness(1 + burst*1.2)`로, 육지는 기존 프레스(`intensity`) 계산과 한 식으로 합성해 부풀며 밝아지게 했다.
+4. `.korea-map__dot.is-city`의 `box-shadow` 두께를 `1px`→`2px`로 바꿔 바다·육지와 통일하고, 관련 주석도 "은은하게 얇게"에서 "두께 통일"로 갱신했다.
+5. 신규 `src/components/practices/weather/PixelTempIcon.vue`를 `FavoriteHeartDots.vue`와 동일한 구조(7×7 패턴 + grid)로 만들고 `variant: 'hot' | 'cold'` prop으로 불꽃/눈송이 패턴과 `--amber`/`--sea` 색을 고른다. `WeatherMapView.vue`의 사이드 패널 제목에서 `⭐`는 `<FavoriteHeartDots :active="true" :size="14" />`로, `🔥`/`🧊`는 `<PixelTempIcon variant="hot"/"cold" :size="14" />`로 교체했다.
+6. `npx vite build`로 컴파일 오류 없음을 확인했고, 개발 서버를 임시로 띄워 수정/신규 파일 3개(`WeatherMapView.vue`, `KoreaMapDots.vue`, `PixelTempIcon.vue`) 전부 Vite가 200으로 정상 서빙함을 curl로 확인했다. burst의 envelope/ringRadius 곡선은 Node.js로 t=0~0.99 구간을 찍어봐서 순간적으로 강했다가 빠르게 감쇠하고, 반경이 초반에 빠르게 퍼지다 감속하는 의도한 모양이 맞는지 수치로 확인했다.
+
+**트러블슈팅**
+- 문제: 이번에도 Chrome 브라우저 자동화 확장이 연결되지 않아(`tabs_context_mcp` 호출 시 "Browser extension is not connected") 실제 화면에서 fit-scale 동작, 윤슬 색, burst 애니메이션, 아이콘 렌더링을 눈으로 확인하지 못했다.
+- 원인: 이전 라운드들과 동일한 브라우저 확장 연결 문제(원인 미상).
+- 해결: `npx vite build` 통과, 개발 서버 curl 확인(수정 파일 3개 모두 200 정상 서빙), burst 곡선 수치 검증(Node.js)까지만 내가 확인할 수 있는 범위였고, 실제 화면 검증은 사용자에게 요청했다.
+
+**결과**
+- 빌드 통과, 수정/신규 파일 모두 Vite에서 정상 컴파일·서빙됨을 확인했다.
+- burst 애니메이션의 envelope·ringRadius 곡선이 의도한 형태(순간적으로 강했다 빠르게 사그라들고, 반경은 빠르게 퍼졌다 감속)임을 수치로 확인했다.
+- (브라우저 자동화 도구 연결 불가로 실제 화면 확인은 사용자 몫으로 남음) 코드상으로는 팝업이 화면보다 크면 자동으로 축소되어 항상 스크롤 없이 다 보이도록, 바다 파동이 크림 화이트로 섞이도록, 도시 클릭 시 폭발 이펙트가 재생되도록, 도시 테두리가 2px로 통일되도록, 사이드 패널 제목이 픽셀 아이콘을 쓰도록 구현했다.
+
+**느낀점**
+- "위치만 클램프"해서는 풀리지 않는 문제(콘텐츠 자체가 화면보다 큰 경우)를 만났을 때, 위치 계산 로직을 더 정교하게 다듬기보다 "통째로 축소한다"는 한 단계 다른 층위의 해법으로 옮기는 게 오히려 더 단순하고 견고했다. 같은 문제를 같은 층위에서 계속 땜질하기보다, 문제가 반복되면 접근 자체를 한 단계 위(또는 다른 축)에서 다시 보는 게 낫다는 걸 다시 확인했다.
+- 이미 있는 애니메이션 파이프라인(파동/프레스)에 새 효과(burst)를 얹을 때, 처음부터 "이 효과는 다른 효과들과 무엇을 공유하고 무엇을 공유하면 안 되는가"(버퍼는 분리하되 rAF 루프는 공유)를 먼저 정하고 시작하니 구현이 깔끔했다 — 무작정 복사-붙여넣기로 시작했다면 버퍼가 꼬였을 것 같다.
+
+---
+
 <!--
 아래 형식을 복사해서 작업 단위마다 항목을 추가합니다.
 

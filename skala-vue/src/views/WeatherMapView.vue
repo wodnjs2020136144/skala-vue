@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, nextTick, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useConfigStore } from '../stores/configStore'
 import { useFavoritesStore } from '../stores/favoritesStore'
@@ -10,6 +10,7 @@ import KoreaMapDots from '../components/practices/weather/KoreaMapDots.vue'
 import FavoriteHeartDots from '../components/practices/weather/FavoriteHeartDots.vue'
 import WeatherStatsPanel from '../components/practices/weather/WeatherStatsPanel.vue'
 import DotMatrixIcon from '../components/practices/weather/DotMatrixIcon.vue'
+import PixelTempIcon from '../components/practices/weather/PixelTempIcon.vue'
 import UnitToggler from '../components/UnitToggler.vue'
 
 const route = useRoute()
@@ -46,6 +47,11 @@ onMounted(async () => {
     const city = cityList.value.find((c) => c.id === cityId)
     if (city) selectCityById(city)
   }
+  window.addEventListener('resize', handleWindowResize)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', handleWindowResize)
 })
 
 watch(() => demoStore.useDummyData, loadCities)
@@ -97,27 +103,37 @@ const favoriteCitiesWithWeather = computed(() =>
 const hottestThree = computed(() => [...cityList.value].sort((a, b) => b.temp - a.temp).slice(0, 3))
 const coldestThree = computed(() => [...cityList.value].sort((a, b) => a.temp - b.temp).slice(0, 3))
 
-// popupRef가 아직 없는 최초 프레임(실측 전)에만 쓰이는 폴백값.
-const POPUP_WIDTH = 320
-const POPUP_HEIGHT_ESTIMATE = 480
 const POPUP_MARGIN = 12
+// 실측 크기가 화면보다 커서 팝업을 통째로 축소해야 할 때, 글씨를 읽을 수 있는 최소 배율.
+const MIN_FIT_SCALE = 0.7
 
 const popupRef = ref(null)
 const popupPosition = ref({ left: '0px', top: '0px' })
+// 창 리사이즈 중에도 같은 지점을 중심으로 다시 계산하기 위해 마지막으로 연 좌표를 기억해둔다.
+let lastPopupCenter = null
 
-// 어림값 대신 팝업이 실제로 렌더링된 뒤 그 크기를 직접 측정해 위치를 계산한다 — 콘텐츠나
-// 폰트 크기가 바뀔 때마다 어림값을 다시 맞춰야 했던 문제(800→560→480으로 계속 어긋남)를
-// 근본적으로 없앤다. 클릭 지점(또는 화면 중앙)을 팝업의 중심으로 두고 화면 안에 완전히
-// 들어오도록 clamp한다. 트랜지션은 opacity/transform만 바꾸므로 측정에 영향이 없다.
+// 팝업이 실제로 렌더링된 뒤 그 크기를 직접 측정해 위치를 계산한다 — 어림값을 콘텐츠가
+// 바뀔 때마다 다시 맞춰야 했던 문제를 없앤다. 클릭 지점(또는 화면 중앙)을 팝업의 중심으로
+// 두되, 실측 크기가 화면보다 크면 팝업 전체를 축소(fit-scale)해서 스크롤 없이 다 보이게
+// 한다. offsetHeight/Width는 transform의 영향을 받지 않으므로 트랜지션·스케일과 무관하게
+// 정확하다.
 async function positionPopupAt(centerX, centerY) {
+  lastPopupCenter = { x: centerX, y: centerY }
   await nextTick()
   const el = popupRef.value
-  const height = el?.offsetHeight ?? POPUP_HEIGHT_ESTIMATE
-  const width = el?.offsetWidth ?? POPUP_WIDTH
+  if (!el) return
+  const rawH = el.offsetHeight
+  const rawW = el.offsetWidth
+  const availH = window.innerHeight - POPUP_MARGIN * 2
+  const availW = window.innerWidth - POPUP_MARGIN * 2
 
-  const left = Math.max(POPUP_MARGIN, Math.min(centerX - width / 2, window.innerWidth - width - POPUP_MARGIN))
-  const top = Math.max(POPUP_MARGIN, Math.min(centerY - height / 2, window.innerHeight - height - POPUP_MARGIN))
-  popupPosition.value = { left: `${left}px`, top: `${top}px` }
+  const fitScale = Math.max(MIN_FIT_SCALE, Math.min(1, availH / rawH, availW / rawW))
+  const h = rawH * fitScale
+  const w = rawW * fitScale
+
+  const left = Math.max(POPUP_MARGIN, Math.min(centerX - w / 2, window.innerWidth - w - POPUP_MARGIN))
+  const top = Math.max(POPUP_MARGIN, Math.min(centerY - h / 2, window.innerHeight - h - POPUP_MARGIN))
+  popupPosition.value = { left: `${left}px`, top: `${top}px`, '--fit-scale': fitScale }
 }
 
 function selectCity({ city, rect }) {
@@ -132,6 +148,13 @@ function selectCityById(city) {
 
 function closePopup() {
   selectedId.value = null
+  lastPopupCenter = null
+}
+
+// 팝업이 열린 채로 창 크기가 바뀌면 같은 중심 좌표로 위치·fit-scale을 다시 계산한다.
+function handleWindowResize() {
+  if (!lastPopupCenter) return
+  positionPopupAt(lastPopupCenter.x, lastPopupCenter.y)
 }
 
 </script>
@@ -144,7 +167,9 @@ function closePopup() {
     <template v-else>
       <div class="weather-map__body">
         <aside class="weather-map__side weather-map__side--left">
-          <h2 class="weather-map__side-title">⭐ 즐겨찾기</h2>
+          <h2 class="weather-map__side-title">
+            <FavoriteHeartDots :active="true" :size="14" /> 즐겨찾기
+          </h2>
           <button
             v-for="city in favoriteCitiesWithWeather"
             :key="city.id"
@@ -166,7 +191,9 @@ function closePopup() {
 
         <aside class="weather-map__side weather-map__side--right">
           <h2 class="weather-map__side-title">오늘의 순위</h2>
-          <p class="weather-map__side-subtitle">🔥 가장 더운 지역</p>
+          <p class="weather-map__side-subtitle">
+            <PixelTempIcon variant="hot" :size="14" /> 가장 더운 지역
+          </p>
           <button
             v-for="(city, index) in hottestThree"
             :key="city.id"
@@ -177,7 +204,9 @@ function closePopup() {
             <span class="weather-map__side-name">{{ city.name }}</span>
             <span class="weather-map__side-temp">{{ convertTemp(city.temp) }}°</span>
           </button>
-          <p class="weather-map__side-subtitle">🧊 가장 추운 지역</p>
+          <p class="weather-map__side-subtitle">
+            <PixelTempIcon variant="cold" :size="14" /> 가장 추운 지역
+          </p>
           <button
             v-for="(city, index) in coldestThree"
             :key="city.id"
@@ -194,25 +223,27 @@ function closePopup() {
       <Transition name="popup">
         <div v-if="selectedCity" class="popup-backdrop" @click="closePopup">
           <div ref="popupRef" class="weather-popup" :style="popupPosition" @click.stop>
-            <div class="weather-popup__head">
-              <p class="weather-popup__name">{{ selectedCity.name }}</p>
-              <div class="weather-popup__head-actions">
-                <UnitToggler />
-                <button
-                  class="weather-popup__fav-btn"
-                  @click="favoritesStore.toggleFavorite(selectedCity.id)"
-                >
-                  <FavoriteHeartDots :active="favoritesStore.isFavorite(selectedCity.id)" :size="20" />
-                </button>
-                <button class="weather-popup__close-btn" @click="closePopup">✕</button>
+            <div class="weather-popup__inner">
+              <div class="weather-popup__head">
+                <p class="weather-popup__name">{{ selectedCity.name }}</p>
+                <div class="weather-popup__head-actions">
+                  <UnitToggler />
+                  <button
+                    class="weather-popup__fav-btn"
+                    @click="favoritesStore.toggleFavorite(selectedCity.id)"
+                  >
+                    <FavoriteHeartDots :active="favoritesStore.isFavorite(selectedCity.id)" :size="20" />
+                  </button>
+                  <button class="weather-popup__close-btn" @click="closePopup">✕</button>
+                </div>
               </div>
+
+              <p class="weather-popup__temp">
+                {{ displayTemp }}<span>°{{ configStore.unitSymbol }}</span>
+              </p>
+
+              <WeatherStatsPanel :city="selectedCity" compact />
             </div>
-
-            <p class="weather-popup__temp">
-              {{ displayTemp }}<span>°{{ configStore.unitSymbol }}</span>
-            </p>
-
-            <WeatherStatsPanel :city="selectedCity" compact />
           </div>
         </div>
       </Transition>
@@ -271,6 +302,9 @@ function closePopup() {
 }
 
 .weather-map__side-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   margin: 0 0 8px;
   font-family: var(--font-pixel-kr);
   font-size: 14px;
@@ -279,6 +313,9 @@ function closePopup() {
 }
 
 .weather-map__side-subtitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   margin: 12px 0 4px;
   font-family: var(--font-mono);
   font-size: 12px;
@@ -370,26 +407,34 @@ function closePopup() {
   z-index: 50;
 }
 
+/* 위치 + fit-scale 전담. 트랜지션의 scale(0.9)와 겹치면 offsetHeight 실측이 흔들리므로
+   등장/퇴장 애니메이션은 안쪽 .weather-popup__inner에서 따로 처리한다. */
 .weather-popup {
   position: fixed;
   width: 320px;
-  max-height: min(520px, calc(100vh - 24px));
+  transform: scale(var(--fit-scale, 1));
+  transform-origin: top left;
+  /* MIN_FIT_SCALE(0.7)에도 화면에 안 들어가는 극단적인 경우를 위한 최후의 안전장치 */
+  max-height: calc(100vh - 24px);
   overflow-y: auto;
+}
+
+.weather-popup__inner {
   background: var(--paper);
   border-radius: 16px;
   padding: 18px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
 
-.popup-enter-active .weather-popup,
-.popup-leave-active .weather-popup {
+.popup-enter-active .weather-popup__inner,
+.popup-leave-active .weather-popup__inner {
   transition:
     transform 0.18s ease,
     opacity 0.18s ease;
 }
 
-.popup-enter-from .weather-popup,
-.popup-leave-to .weather-popup {
+.popup-enter-from .weather-popup__inner,
+.popup-leave-to .weather-popup__inner {
   transform: scale(0.9);
   opacity: 0;
 }
@@ -448,13 +493,14 @@ function closePopup() {
     left: 50% !important;
     top: 50% !important;
     bottom: auto !important;
-    transform: translate(-50%, -50%);
+    transform: translate(-50%, -50%) scale(var(--fit-scale, 1));
+    transform-origin: center;
     width: min(300px, calc(100vw - 32px));
   }
 
-  .popup-enter-from .weather-popup,
-  .popup-leave-to .weather-popup {
-    transform: translate(-50%, -50%) scale(0.9);
+  .popup-enter-from .weather-popup__inner,
+  .popup-leave-to .weather-popup__inner {
+    transform: scale(0.9);
   }
 }
 </style>
