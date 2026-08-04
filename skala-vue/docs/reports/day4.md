@@ -778,6 +778,40 @@
 
 ---
 
+## 12. 지도 팝업 축소 — 아이콘·간격을 줄여 스크롤 없이 한 화면에 들어오게
+
+**요구사항**
+- 지도에서 도시를 클릭했을 때 뜨는 팝업이 세로로 너무 길어(첨부 이미지: 낮 진행률 막대가 화면 아래로 잘림) 한눈에 안 들어온다는 피드백을 받아, 팝업 크기를 줄여달라는 요청을 받았다.
+
+**사고 과정**
+- 팝업 높이의 가장 큰 비중을 차지하는 건 `WeatherStatsPanel` 안의 `DotMatrixIcon`(`size="lg"`, 260×260px)이었다. 이 컴포넌트는 지도 팝업과 날씨 상세 페이지(`WeatherDetailView`) 양쪽에서 공유되는데, 상세 페이지는 화면 전체를 쓰므로 굳이 줄일 필요가 없다. 그래서 컴포넌트 자체를 줄이지 않고, "좁은 곳에서 쓸 때만 작아지는" `compact` prop을 추가해 팝업에서만 영향을 주는 쪽으로 갔다.
+
+**해결 과정**
+1. `DotMatrixIcon.vue`에 `sm`/`lg` 두 크기만 있던 것에 `md`(150×150px)를 추가했다(기존 크기 동작은 그대로라 다른 사용처에 영향 없음).
+2. `WeatherStatsPanel.vue`에 `compact` prop을 추가해, true일 때 아이콘을 `size="md"`로 줄이고 통계 막대 간격·여백을 좁혔다.
+
+   #### `src/components/practices/weather/WeatherStatsPanel.vue`
+   ```vue
+   <DotMatrixIcon :condition="city.condition" :size="compact ? 'md' : 'lg'" :animated="true" />
+   ```
+3. `WeatherMapView.vue`에서 `<WeatherStatsPanel :city="selectedCity" compact />`로 호출하고, 팝업 자체 폭(380→320px)·패딩(24→18px)·온도 폰트(40→32px)도 비례해 줄였다.
+
+**트러블슈팅**
+- 없음.
+
+**결과**
+- `npx vite build` 통과를 확인했다.
+- 지도에서 도시를 클릭했을 때 팝업이 스크롤 없이 화면에 전부 들어오는 것을 확인했다.
+- `/weather/:id` 상세 페이지의 `WeatherStatsPanel`은 `compact`를 넘기지 않아 기존과 동일한 크기(`size="lg"`, 260px)로 유지되는 것을 확인해 회귀가 없음을 검증했다.
+- ℃/℉ 전환, 즐겨찾기, 닫기 버튼 등 팝업 내부 인터랙션이 축소 후에도 정상 동작함을 확인했다.
+
+![Day 4 지도 — 축소된 팝업(스크롤 없이 한 화면에 들어옴)](./images/day4/29-map-popup-compact.png)
+
+**느낀점**
+- 여러 화면에서 공유하는 컴포넌트를 줄여야 할 때, 컴포넌트 자체의 기본 크기를 바꾸기보다 "좁은 곳에서만 작아지는" 선택적 prop을 추가하는 편이 다른 사용처에 대한 회귀 위험을 원천적으로 없앤다는 걸 다시 확인했다.
+
+---
+
 <!--
 아래 형식을 복사해서 작업 단위마다 항목을 추가합니다.
 

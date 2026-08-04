@@ -82,8 +82,8 @@ const displayTemp = computed(() => {
     : selectedCity.value.temp
 })
 
-const POPUP_WIDTH = 380
-const POPUP_HEIGHT_ESTIMATE = 800
+const POPUP_WIDTH = 320
+const POPUP_HEIGHT_ESTIMATE = 560
 const POPUP_MARGIN = 12
 
 // 클릭 위치 근처, 화면 밖으로 넘치지 않게 top/left를 모두 clamp한 팝업 좌표.
@@ -156,7 +156,7 @@ function closePopup() {
               {{ displayTemp }}<span>°{{ configStore.unitSymbol }}</span>
             </p>
 
-            <WeatherStatsPanel :city="selectedCity" />
+            <WeatherStatsPanel :city="selectedCity" compact />
           </div>
         </div>
       </Transition>
@@ -212,12 +212,12 @@ function closePopup() {
 
 .weather-popup {
   position: fixed;
-  width: 380px;
-  max-height: min(780px, calc(100vh - 24px));
+  width: 320px;
+  max-height: min(560px, calc(100vh - 24px));
   overflow-y: auto;
   background: var(--paper);
   border-radius: 16px;
-  padding: 24px;
+  padding: 18px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
 
@@ -269,9 +269,9 @@ function closePopup() {
 }
 
 .weather-popup__temp {
-  margin: 4px 0 12px;
+  margin: 4px 0 10px;
   font-family: var(--font-pixel);
-  font-size: 40px;
+  font-size: 32px;
   color: var(--ink);
   line-height: 1;
 }
@@ -289,7 +289,7 @@ function closePopup() {
     top: 50% !important;
     bottom: auto !important;
     transform: translate(-50%, -50%);
-    width: min(340px, calc(100vw - 32px));
+    width: min(300px, calc(100vw - 32px));
   }
 
   .popup-enter-from .weather-popup,

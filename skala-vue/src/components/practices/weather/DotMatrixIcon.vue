@@ -8,7 +8,7 @@ const props = defineProps({
   },
   size: {
     type: String,
-    default: 'lg', // sm | lg
+    default: 'lg', // sm | md | lg
   },
   animated: {
     type: Boolean,
@@ -379,6 +379,12 @@ const dots = computed(() => {
 .dot-matrix--lg {
   width: 260px;
   height: 260px;
+}
+
+.dot-matrix--md {
+  width: 150px;
+  height: 150px;
+  padding: 10px;
 }
 
 .dot-matrix--sm {

@@ -9,6 +9,12 @@ const props = defineProps({
     type: Object,
     required: true, // fetchCurrentWeather()/getDummyWeather() 반환 형태
   },
+  // 지도 팝업처럼 공간이 좁은 곳에서 쓸 때 true로 넘기면 아이콘·여백이 줄어든다.
+  // 상세 페이지(WeatherDetailView)는 기본값(false)으로 기존 크기를 그대로 쓴다.
+  compact: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 const configStore = useConfigStore()
@@ -43,9 +49,9 @@ function formatTime(unixSeconds) {
 </script>
 
 <template>
-  <div class="weather-stats-panel">
+  <div class="weather-stats-panel" :class="{ 'weather-stats-panel--compact': compact }">
     <div class="weather-stats-panel__screen">
-      <DotMatrixIcon :condition="city.condition" size="lg" :animated="true" />
+      <DotMatrixIcon :condition="city.condition" :size="compact ? 'md' : 'lg'" :animated="true" />
     </div>
     <p class="weather-stats-panel__status">{{ city.status }}</p>
 
@@ -99,6 +105,18 @@ function formatTime(unixSeconds) {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.weather-stats-panel--compact .weather-stats-panel__status {
+  margin-bottom: 12px;
+}
+
+.weather-stats-panel--compact .weather-stats-panel__stats {
+  gap: 8px;
+}
+
+.weather-stats-panel--compact .weather-stats-panel__extra {
+  margin-top: 10px;
 }
 
 .weather-stats-panel__extra {
