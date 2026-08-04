@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useConfigStore } from '../stores/configStore'
 import { useFavoritesStore } from '../stores/favoritesStore'
@@ -22,7 +22,6 @@ const cityList = ref([])
 const isLoading = ref(true)
 const loadError = ref('')
 const selectedId = ref(null)
-const popupAnchor = ref(null)
 
 async function loadCities() {
   isLoading.value = true
@@ -98,44 +97,41 @@ const favoriteCitiesWithWeather = computed(() =>
 const hottestThree = computed(() => [...cityList.value].sort((a, b) => b.temp - a.temp).slice(0, 3))
 const coldestThree = computed(() => [...cityList.value].sort((a, b) => a.temp - b.temp).slice(0, 3))
 
+// popupRef가 아직 없는 최초 프레임(실측 전)에만 쓰이는 폴백값.
 const POPUP_WIDTH = 320
 const POPUP_HEIGHT_ESTIMATE = 480
 const POPUP_MARGIN = 12
 
-// 클릭 지점(또는 화면 중앙)을 팝업의 세로 중심으로 두고, 화면 안에 완전히 들어오도록
-// top/left를 모두 clamp한다. 도시 도트 대부분이 한반도 지형상 화면 중하단에 몰려 있어
-// "아래로 열고 공간 없으면 위로 뒤집는" 방식은 거의 항상 아래쪽에 붙어 보이는 문제가
-// 있었다 — 중심 기준으로 잡으면 클릭 위치와 무관하게 항상 화면 안에 고르게 들어온다.
-// 모바일 폭에서는 CSS가 중앙 고정으로 덮어쓴다.
-const popupStyle = computed(() => {
-  if (!popupAnchor.value) return {}
-  const { left, centerY } = popupAnchor.value
-  const maxLeft = window.innerWidth - POPUP_WIDTH - POPUP_MARGIN
-  const clampedLeft = Math.max(POPUP_MARGIN, Math.min(left, maxLeft))
+const popupRef = ref(null)
+const popupPosition = ref({ left: '0px', top: '0px' })
 
-  const rawTop = centerY - POPUP_HEIGHT_ESTIMATE / 2
-  const maxTop = window.innerHeight - POPUP_HEIGHT_ESTIMATE - POPUP_MARGIN
-  const clampedTop = Math.max(POPUP_MARGIN, Math.min(rawTop, maxTop))
+// 어림값 대신 팝업이 실제로 렌더링된 뒤 그 크기를 직접 측정해 위치를 계산한다 — 콘텐츠나
+// 폰트 크기가 바뀔 때마다 어림값을 다시 맞춰야 했던 문제(800→560→480으로 계속 어긋남)를
+// 근본적으로 없앤다. 클릭 지점(또는 화면 중앙)을 팝업의 중심으로 두고 화면 안에 완전히
+// 들어오도록 clamp한다. 트랜지션은 opacity/transform만 바꾸므로 측정에 영향이 없다.
+async function positionPopupAt(centerX, centerY) {
+  await nextTick()
+  const el = popupRef.value
+  const height = el?.offsetHeight ?? POPUP_HEIGHT_ESTIMATE
+  const width = el?.offsetWidth ?? POPUP_WIDTH
 
-  return { left: `${clampedLeft}px`, top: `${clampedTop}px` }
-})
+  const left = Math.max(POPUP_MARGIN, Math.min(centerX - width / 2, window.innerWidth - width - POPUP_MARGIN))
+  const top = Math.max(POPUP_MARGIN, Math.min(centerY - height / 2, window.innerHeight - height - POPUP_MARGIN))
+  popupPosition.value = { left: `${left}px`, top: `${top}px` }
+}
 
 function selectCity({ city, rect }) {
   selectedId.value = city.id
-  popupAnchor.value = { left: rect.left, centerY: (rect.top + rect.bottom) / 2 }
+  positionPopupAt((rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2)
 }
 
 function selectCityById(city) {
   selectedId.value = city.id
-  popupAnchor.value = {
-    left: window.innerWidth / 2 - POPUP_WIDTH / 2,
-    centerY: window.innerHeight / 2,
-  }
+  positionPopupAt(window.innerWidth / 2, window.innerHeight / 2)
 }
 
 function closePopup() {
   selectedId.value = null
-  popupAnchor.value = null
 }
 
 </script>
@@ -147,7 +143,7 @@ function closePopup() {
 
     <template v-else>
       <div class="weather-map__body">
-        <aside class="weather-map__side">
+        <aside class="weather-map__side weather-map__side--left">
           <h2 class="weather-map__side-title">⭐ 즐겨찾기</h2>
           <button
             v-for="city in favoriteCitiesWithWeather"
@@ -168,7 +164,7 @@ function closePopup() {
           <KoreaMapDots :cities="cityList" :selected-id="selectedId" @select-city="selectCity" />
         </div>
 
-        <aside class="weather-map__side">
+        <aside class="weather-map__side weather-map__side--right">
           <h2 class="weather-map__side-title">오늘의 순위</h2>
           <p class="weather-map__side-subtitle">🔥 가장 더운 지역</p>
           <button
@@ -197,7 +193,7 @@ function closePopup() {
 
       <Transition name="popup">
         <div v-if="selectedCity" class="popup-backdrop" @click="closePopup">
-          <div class="weather-popup" :style="popupStyle" @click.stop>
+          <div ref="popupRef" class="weather-popup" :style="popupPosition" @click.stop>
             <div class="weather-popup__head">
               <p class="weather-popup__name">{{ selectedCity.name }}</p>
               <div class="weather-popup__head-actions">
@@ -237,34 +233,48 @@ function closePopup() {
 }
 
 .weather-map__body {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-}
-
-.weather-map__grid-area {
   position: relative;
   flex: 1;
   min-height: 0;
 }
 
-/* 좌우 사이드 패널 — 즐겨찾기 / 온도 TOP3 순위 */
+.weather-map__grid-area {
+  position: absolute;
+  inset: 0;
+}
+
+/* 좌우 사이드 패널 — 즐겨찾기 / 온도 TOP3 순위. 지도 폭을 줄이는 고정 컬럼이 아니라,
+   바다 배경 위에 뜨는 게임 배너/이벤트창처럼 지도 위를 덮어 띄운다. 팝업(z-index:50)
+   보다는 낮게 둬서 팝업이 항상 그 위에 보인다. */
 .weather-map__side {
-  flex: 0 0 220px;
+  position: absolute;
+  top: 16px;
+  bottom: 16px;
   width: 220px;
+  z-index: 10;
   padding: 16px 12px;
-  background: var(--ink);
+  background: var(--paper);
+  border-radius: 16px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
+.weather-map__side--left {
+  left: 16px;
+}
+
+.weather-map__side--right {
+  right: 16px;
+}
+
 .weather-map__side-title {
   margin: 0 0 8px;
   font-family: var(--font-pixel-kr);
   font-size: 14px;
-  color: var(--amber);
+  color: var(--ink);
   letter-spacing: 0.05em;
 }
 
@@ -272,8 +282,7 @@ function closePopup() {
   margin: 12px 0 4px;
   font-family: var(--font-mono);
   font-size: 12px;
-  color: var(--paper);
-  opacity: 0.7;
+  color: var(--moss);
 }
 
 .weather-map__side-item {
@@ -281,7 +290,7 @@ function closePopup() {
   align-items: center;
   gap: 8px;
   border: none;
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(0, 0, 0, 0.04);
   border-radius: 8px;
   padding: 6px 8px;
   cursor: pointer;
@@ -289,7 +298,7 @@ function closePopup() {
 }
 
 .weather-map__side-item:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.08);
 }
 
 .weather-map__side-rank {
@@ -310,7 +319,7 @@ function closePopup() {
   flex: 1;
   font-family: var(--font-pixel-kr);
   font-size: 12px;
-  color: var(--paper);
+  color: var(--ink);
 }
 
 .weather-map__side-temp {
@@ -323,8 +332,7 @@ function closePopup() {
   margin: 0;
   font-family: var(--font-mono);
   font-size: 12px;
-  color: var(--paper);
-  opacity: 0.6;
+  color: var(--moss);
 }
 
 /* 좁은 화면에서는 지도가 눌리지 않도록 사이드 패널을 숨긴다 */

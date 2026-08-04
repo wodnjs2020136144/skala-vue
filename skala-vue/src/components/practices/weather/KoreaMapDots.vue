@@ -104,6 +104,19 @@ function pulseColor(city) {
   return CONDITION_ACCENT_COLORS[city.condition] ?? CONDITION_ACCENT_COLORS.sun
 }
 
+// 육지·바다처럼 도시 도트의 테두리(box-shadow)도 자기 색 그대로가 아니라 살짝 어둡게 —
+// 배경과 구분이 잘 안 되던 문제를 육지에 썼던 것과 같은 방식으로 해결한다.
+function darken(hex, amount = 0.15) {
+  const num = parseInt(hex.slice(1), 16)
+  const r = Math.round(((num >> 16) & 255) * (1 - amount))
+  const g = Math.round(((num >> 8) & 255) * (1 - amount))
+  const b = Math.round((num & 255) * (1 - amount))
+  return `rgb(${r}, ${g}, ${b})`
+}
+function markerBorderColor(city) {
+  return darken(markerColor(city.condition))
+}
+
 const rootRef = ref(null)
 const gridRef = ref(null)
 const viewportRef = ref(null)
@@ -552,7 +565,7 @@ function handleCityHover(dot, event) {
               ? {
                   background: markerColor(dot.city.condition),
                   '--pulse-color': pulseColor(dot.city),
-                  '--marker-color': markerColor(dot.city.condition),
+                  '--marker-border-color': markerBorderColor(dot.city),
                 }
               : undefined
           "
@@ -600,9 +613,10 @@ function handleCityHover(dot, event) {
   /* 완전히 평평한 단색 도트. 파동이 지나갈 때만 밝기(filter)로 색이 밝아진다 — 그림자/그러데이션 없음. */
   background: #7cc0cb;
   filter: brightness(calc(1 + var(--intensity, 0) * 0.9));
-  /* 자기 배경색과 같은 box-shadow로 칸 사이 격자 간격을 메워, 바다가 빈틈없이 꽉 찬
-     하나의 면처럼 보이게 한다(육지의 영역 구분 기법과 같은 원리). */
-  box-shadow: 0 0 0 2px #7cc0cb;
+  /* 자기 배경색보다 약 15% 어둡게 계산한 box-shadow로 칸 사이 격자 간격을 메워, 바다가
+     빈틈없이 꽉 찬 하나의 면처럼 보이게 한다(육지의 영역 구분 기법과 같은 원리). 배경과
+     완전히 같은 색이면 테두리가 안 보여서, 육지처럼 한 단계 진하게 뒀다. */
+  box-shadow: 0 0 0 2px #69a3ad;
 }
 
 .korea-map__dot.is-land {
@@ -620,10 +634,11 @@ function handleCityHover(dot, event) {
   z-index: 1;
   cursor: pointer;
   transition: transform 0.15s ease;
-  /* 육지·바다처럼 도시도 자기 날씨색으로 꽉 찬 느낌을 내되, 은은하게 보이도록 육지보다
-     살짝 얇게(1px) 두른다. is-land와 동시에 걸리는 경우(도시는 대부분 육지 위)가 많아,
-     같은 특이도의 이 규칙이 스타일시트 순서상 나중이라 자동으로 우선 적용된다. */
-  box-shadow: 0 0 0 1px var(--marker-color, var(--amber));
+  /* 육지·바다처럼 도시도 꽉 찬 느낌을 내되, 자기 색 그대로면 배경과 구분이 안 돼 마커색을
+     15% 어둡게 계산한 --marker-border-color를 쓴다(은은하게 보이도록 육지보다 얇게 1px).
+     is-land와 동시에 걸리는 경우(도시는 대부분 육지 위)가 많아, 같은 특이도의 이 규칙이
+     스타일시트 순서상 나중이라 자동으로 우선 적용된다. */
+  box-shadow: 0 0 0 1px var(--marker-border-color, var(--amber));
 }
 
 /* 평상시엔 주변 지형 도트와 완전히 같은 크기 — 확대·글로우·펄스는 호버했을 때만 나타난다. */

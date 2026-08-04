@@ -878,6 +878,67 @@
 
 ---
 
+## 14. 팝업 위치 실측 전환 + 사이드 패널 오버레이화 + 픽셀 테두리 명도 조정
+
+**요구사항**
+- 직전 작업(13번)을 사용자가 실제로 확인해보니, 팝업이 여전히 화면 아래로 잘려 나온다는 스크린샷과 함께 재조정 요청을 받았다.
+- 좌우 사이드 패널이 지도 폭을 줄이는 고정 컬럼으로 붙어 있는데, 바다 배경 위에 뜨는 게임 배너/이벤트창처럼 "떠 있는 패널"로 바꿔달라는 요청을 받았다.
+- 바다·주요 지역(도시) 픽셀의 테두리 색이 자기 색과 완전히 같아 구분이 잘 안 되니, 육지처럼 자기 색보다 진한 색으로 바꿔달라는 요청을 받았다.
+
+**사고 과정**
+- 팝업 위치는 지난 두 라운드에서 어림값(`POPUP_HEIGHT_ESTIMATE`)을 800→560→480으로 계속 손으로 맞춰왔는데도 매번 살짝 어긋났다. 근본 원인은 "콘텐츠 높이를 미리 예측해서 위치를 계산한다"는 접근 자체였다 — 아이콘 크기, 패딩, 폰트가 바뀔 때마다 다시 틀어질 수밖에 없는 구조다. 어림값을 또 조정하는 대신, **팝업이 실제로 DOM에 그려진 뒤 그 크기를 직접 측정**해서 위치를 계산하면 이후 콘텐츠가 어떻게 바뀌어도 항상 정확하다고 판단했다. `nextTick()`으로 렌더링을 기다린 뒤 `offsetHeight`/`offsetWidth`를 읽으면 되고, CSS 트랜지션은 opacity/transform만 다루므로 레이아웃 크기(offsetHeight)에는 영향을 주지 않아 측정 타이밍 문제도 없다.
+- 사이드 패널을 "떠 있는 패널"로 바꾸는 건 레이아웃 방식의 전환이었다 — flex row로 폭을 나눠 갖던 것을, 지도를 다시 컨테이너 전체를 채우게 하고 사이드 패널은 그 위에 `position: absolute`로 얹는 방식으로 바꿨다. 이왕 "이벤트창처럼" 보이길 원해서, 기존에 평평한 어두운 블록이던 배경을 이미 있는 날씨 팝업과 같은 "밝은 카드 + 그림자" 룩으로 통일했다(카드 배경이 밝아졌으니 글자색도 어두운 배경 기준(cream/paper)에서 밝은 배경 기준(ink/moss)으로 같이 바꿔야 했다).
+- 픽셀 테두리 명도 조정은 지난 라운드에 육지에 이미 적용한 "자기 색보다 진하게" 원리를 그대로 바다·도시에 옮기는 것뿐이라 새로 고민할 부분은 적었다. 다만 바다는 고정된 단일 색이라 계산값을 그냥 하드코딩하면 되지만, 도시는 조건별로 색이 6가지라 매번 손으로 계산하기보다 재사용 가능한 `darken(hex, amount)` 유틸을 만들어 인라인으로 계산하는 쪽이 유지보수하기 낫다고 봤다.
+
+**해결 과정**
+1. `src/views/WeatherMapView.vue`에 `popupRef`(템플릿 ref)와 `popupPosition`(반응형 좌표)을 추가하고, `positionPopupAt(centerX, centerY)`가 `nextTick()` 이후 실측 크기로 클램프된 위치를 계산하도록 바꿨다. `selectCity`/`selectCityById`는 이제 클릭 지점(또는 화면 중앙)의 중심 좌표만 넘긴다.
+
+   #### `src/views/WeatherMapView.vue`
+   ```js
+   async function positionPopupAt(centerX, centerY) {
+     await nextTick()
+     const el = popupRef.value
+     const height = el?.offsetHeight ?? POPUP_HEIGHT_ESTIMATE
+     const width = el?.offsetWidth ?? POPUP_WIDTH
+     const left = Math.max(POPUP_MARGIN, Math.min(centerX - width / 2, window.innerWidth - width - POPUP_MARGIN))
+     const top = Math.max(POPUP_MARGIN, Math.min(centerY - height / 2, window.innerHeight - height - POPUP_MARGIN))
+     popupPosition.value = { left: `${left}px`, top: `${top}px` }
+   }
+   ```
+2. `.weather-map__body`를 `position: relative` 컨테이너로, `.weather-map__grid-area`를 그 안을 꽉 채우는 `position: absolute; inset:0`으로 바꿔 지도가 다시 전체 폭을 쓰게 했다. `.weather-map__side`를 `position: absolute`(좌/우 16px, 위/아래 16px)로 바꾸고, 배경을 `var(--ink)` 평면 블록에서 `var(--paper)` + `border-radius` + `box-shadow`(날씨 팝업과 동일한 룩)로 교체했다. `z-index: 10`으로 지도 위·팝업(50) 아래에 오도록 뒀다.
+3. `src/components/practices/weather/KoreaMapDots.vue`에 `darken(hex, amount)` 유틸을 추가하고, 바다 도트의 `box-shadow` 색을 `#7cc0cb`(자기 색 그대로)에서 15% 어둡게 계산한 `#69a3ad`로, 도시 도트는 인라인으로 넘기던 `--marker-color`(자기 색 그대로) 대신 `--marker-border-color`(`darken(markerColor(...))`)를 넘겨 `box-shadow`가 이 값을 쓰도록 바꿨다.
+
+   #### `src/components/practices/weather/KoreaMapDots.vue`
+   ```js
+   function darken(hex, amount = 0.15) {
+     const num = parseInt(hex.slice(1), 16)
+     const r = Math.round(((num >> 16) & 255) * (1 - amount))
+     const g = Math.round(((num >> 8) & 255) * (1 - amount))
+     const b = Math.round((num & 255) * (1 - amount))
+     return `rgb(${r}, ${g}, ${b})`
+   }
+   function markerBorderColor(city) {
+     return darken(markerColor(city.condition))
+   }
+   ```
+4. `npx vite build`로 컴파일 오류가 없는지 확인하고, 개발 서버에서 수정한 두 파일을 직접 요청해 Vite가 정상 컴파일·서빙(200)하는지 확인했다. `darken()` 계산 결과는 Node.js로 6가지 조건 색 전부를 미리 돌려봐서 육안으로도 뚜렷이 어두워진 값이 나오는지 확인했다.
+
+**트러블슈팅**
+- 문제: 이번 라운드도 Chrome 확장이 세션 내내 연결되지 않아(여러 차례 재시도, 간격을 두고 재확인해도 계속 연결 안 됨) 실제 화면 검증을 하지 못했다.
+- 원인: 브라우저 자동화 도구 연결 문제로 추정(원인 미상, 재시도로 해결 안 됨).
+- 해결: 지난 라운드와 동일하게 (1) 빌드 통과, (2) 수정 파일이 Vite에서 정상 컴파일·서빙되는지, (3) 색상 계산처럼 브라우저 없이도 검증 가능한 부분은 Node.js로 별도 확인하는 방식으로 대신했다. 실제 화면에서 팝업이 잘리지 않는지, 사이드 패널이 카드처럼 떠 보이는지, 테두리 명도 차이가 실제로 눈에 띄는지는 여전히 사용자가 직접 확인해야 한다.
+
+**결과**
+- 빌드 통과, 수정한 파일들이 Vite에서 정상 컴파일·서빙됨을 확인했다.
+- `darken()`이 6가지 날씨 조건 색 모두에 대해 뚜렷이 어두운 RGB 값을 반환함을 Node.js로 확인했다.
+- (브라우저 자동화 도구 연결 불가로 실제 화면 확인은 사용자 몫으로 남음) 코드상으로는 팝업이 실측 높이 기준으로 항상 화면 안에 클램프되도록, 사이드 패널이 지도 위 오버레이 카드로 뜨도록, 바다·도시 테두리가 각자 색보다 어둡게 계산되도록 구현했다.
+
+**느낀점**
+- "어림값을 계속 손으로 맞추는" 접근은 값을 아무리 정교하게 재보정해도 콘텐츠가 바뀌는 순간 다시 어긋나는 구조적 한계가 있다는 걸 이번에 확실히 체감했다. 처음부터 "실측"으로 갔다면 지난 두 라운드의 재조정 자체가 필요 없었을 것 — 값을 추측해야 하는 상황을 만나면, 값을 더 정확히 추측하려 하기보다 애초에 추측이 필요 없는 방법이 있는지부터 살펴보는 게 낫다는 교훈을 얻었다.
+- 시각적 확인 도구가 연속으로 두 라운드나 막혔는데도, 사용자가 직접 스크린샷을 찍어 피드백을 줘서 작업을 이어갈 수 있었다. 자동화 검증이 막혔을 때 정직하게 그 사실을 알리고 사용자의 눈을 대신 빌리는 것도 하나의 유효한 검증 경로라는 걸 다시 느꼈다.
+
+---
+
 <!--
 아래 형식을 복사해서 작업 단위마다 항목을 추가합니다.
 
