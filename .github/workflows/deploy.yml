@@ -28,6 +28,10 @@ jobs:
           cache: npm
           cache-dependency-path: skala-vue/package-lock.json
       - run: npm ci
+      - name: debug-secret-length
+        run: node -e "console.log('KEY LENGTH:', (process.env.VITE_OPENWEATHER_API_KEY || '').length)"
+        env:
+          VITE_OPENWEATHER_API_KEY: ${{ secrets.VITE_OPENWEATHER_API_KEY }}
       - run: npm run build
         env:
           # 저장소 Settings > Secrets and variables > Actions에 등록하면 배포된 사이트가
