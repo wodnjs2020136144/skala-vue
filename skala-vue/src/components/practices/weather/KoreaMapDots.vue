@@ -252,6 +252,25 @@ let panY = 0
 let targetPanX = 0
 let targetPanY = 0
 
+// .korea-map__stage(고정 비율 BASE_GRID_W:BASE_GRID_H)의 실제 픽셀 크기. CSS의 aspect-ratio
+// 만으로는 "컨테이너 안에 최대한 크게, 비율 유지, 넘치지 않게"를 계산할 수 없었다(체인 전체에
+// 확정 픽셀값을 가진 시작점이 없어 grid가 최소 크기로 쪼그라드는 버그가 있었다) — <img>의
+// object-fit:contain과 같은 계산을 JS로 직접 해서 인라인 width/height로 박아넣는다.
+const stageSize = ref({ width: 0, height: 0 })
+function updateStageSize() {
+  if (!containerW || !containerH) return
+  const containerAspect = containerW / containerH
+  const stageAspect = BASE_GRID_W / BASE_GRID_H
+  if (containerAspect > stageAspect) {
+    // 컨테이너가 상대적으로 더 넓다 → 높이를 꽉 채우고 폭은 비율대로 계산
+    const height = containerH
+    stageSize.value = { width: height * stageAspect, height }
+  } else {
+    const width = containerW
+    stageSize.value = { width, height: width / stageAspect }
+  }
+}
+
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value))
 }
@@ -627,7 +646,8 @@ function handleResize(entries) {
   containerW = entry.contentRect.width
   containerH = entry.contentRect.height
   // 칸 수는 고정이라(BASE_GRID_W/H) 리사이즈만으로는 buildGrid를 다시 부를 필요가 없다 —
-  // pan 범위(containerW/H 기준)만 다시 clamp하면 된다.
+  // stage 픽셀 크기와 pan 범위(둘 다 containerW/H 기준)만 다시 계산하면 된다.
+  updateStageSize()
   clampPan()
   applyTransform()
 }
@@ -636,6 +656,7 @@ onMounted(() => {
   if (!rootRef.value) return
   containerW = rootRef.value.clientWidth
   containerH = rootRef.value.clientHeight
+  updateStageSize()
   buildGrid()
 
   scale = DEFAULT_SCALE
@@ -706,7 +727,7 @@ function handleCityHover(dot, event) {
     <div ref="viewportRef" class="korea-map__viewport">
       <div
         class="korea-map__stage"
-        :style="{ aspectRatio: `${BASE_GRID_W} / ${BASE_GRID_H}` }"
+        :style="{ width: `${stageSize.width}px`, height: `${stageSize.height}px` }"
       >
         <div
           ref="gridRef"
@@ -773,10 +794,11 @@ function handleCityHover(dot, event) {
   will-change: transform;
 }
 
-/* "한반도 + 약간의 바다" 비율의 박스 — 화면 비율과 무관하게 이 비율을 유지한 채 뷰포트
-   안에 최대한 크게(넘치지 않게) 중앙 배치된다(비율은 :style로 바인딩된 BASE_GRID_W/H).
-   남는 여백은 부모 .weather-map의 바다색 배경이 그대로 비쳐 보여, 화면을 전부 도트로
-   채우던 예전보다 총 도트 수가 훨씬 줄어든다(성능 최적화). */
+/* "한반도 + 약간의 바다" 비율의 박스 — 실제 픽셀 width/height는 JS(updateStageSize)가
+   containerW/H와 BASE_GRID_W/H 비율을 비교해 계산해서 :style로 박아넣는다(CSS aspect-ratio
+   만으로는 이 체인에 확정 크기를 가진 시작점이 없어 grid가 쪼그라드는 문제가 있었다).
+   flex 중앙 정렬로 뷰포트 한가운데 배치되고, 남는 여백은 부모 .weather-map의 바다색
+   배경이 그대로 비쳐 보여, 화면을 전부 도트로 채우던 예전보다 총 도트 수가 줄어든다. */
 .korea-map__stage {
   max-width: 100%;
   max-height: 100%;

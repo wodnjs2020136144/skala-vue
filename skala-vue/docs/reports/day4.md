@@ -1307,6 +1307,54 @@
 
 ---
 
+## 18. 지도 크기 버그 수정 — CSS aspect-ratio 트릭 대신 JS로 실제 픽셀 크기 계산
+
+**요구사항**
+- 직전 라운드(17번)의 "화면 크기를 한반도+약간의 바다로 최적화" 결과를 사용자가 실제로 확인해보니, 지도가 화면 대부분을 차지하며 확대되어야 하는데 오히려 화면 한가운데 아주 작게(약 75px) 쪼그라들어 렌더링됐다. 스크린샷과 함께 큰 실수라는 피드백을 받았다.
+
+**사고 과정**
+- 직전 구현은 `.korea-map__stage`에 `aspect-ratio` + `max-width:100%;max-height:100%`를 주고, 부모 `.korea-map__viewport`를 `display:flex; align-items:center; justify-content:center`로 바꿔서 "브라우저가 알아서 비율을 유지한 채 최대한 크게 중앙 배치해줄 것"을 기대했다. 실제로는 `.korea-map__stage`가 콘텐츠 기반 크기(flex item의 기본값인 auto)로 시작하는데, 그 콘텐츠인 `.korea-map__grid`도 `width:100%;height:100%`(stage 기준)라 확정 크기가 없고, 그 안의 도트들도 다시 grid 기준 100% — **체인 전체에 실제 픽셀값을 가진 시작점이 하나도 없었다.** `aspect-ratio`는 최소 한쪽 축이 확정값이어야 다른 쪽을 계산할 수 있는데 그 조건이 충족되지 않아, CSS Grid의 `1fr` 트랙들이 사실상 최소 크기로 쪼그라들었다. `<img>`의 `object-fit:contain`이 하는 "비율 유지한 채 최대화" 계산은 대체 요소(img/video 등) 전용이고 일반 `<div>`에는 적용되지 않는다는 점도 이 접근이 근본적으로 틀렸던 이유였다.
+- CSS만으로 이 문제를 다시 풀려고 하기보다(finicky한 flex/grid 상호작용에 계속 의존하게 됨), 이미 `containerW`/`containerH`를 JS(ResizeObserver)로 추적하고 있다는 점을 활용해 **stage의 실제 픽셀 크기를 JS에서 직접 계산**하기로 했다 — 브라우저가 이미지에 대해 하는 "contain" 계산을 손으로 구현하는 것과 같아서, CSS 엔진의 암묵적 동작에 기대지 않고 항상 정확하다.
+
+**해결 과정**
+1. `src/components/practices/weather/KoreaMapDots.vue`에 `stageSize` ref와 `updateStageSize()`를 추가해, containerW/H와 BASE_GRID_W/H 비율을 비교해 "컨테이너 안에 최대한 크게, 비율 유지, 넘치지 않게" 채우는 실제 픽셀 크기를 계산한다.
+
+   #### `src/components/practices/weather/KoreaMapDots.vue`
+   ```js
+   const stageSize = ref({ width: 0, height: 0 })
+   function updateStageSize() {
+     if (!containerW || !containerH) return
+     const containerAspect = containerW / containerH
+     const stageAspect = BASE_GRID_W / BASE_GRID_H
+     if (containerAspect > stageAspect) {
+       const height = containerH
+       stageSize.value = { width: height * stageAspect, height }
+     } else {
+       const width = containerW
+       stageSize.value = { width, height: width / stageAspect }
+     }
+   }
+   ```
+2. `onMounted`(containerW/H 최초 설정 직후)와 `handleResize`(containerW/H 갱신 직후) 양쪽에서 `updateStageSize()`를 호출하도록 추가했다.
+3. 템플릿의 `.korea-map__stage`에서 `:style="{ aspectRatio: ... }"`를 `:style="{ width: '${stageSize.width}px', height: '${stageSize.height}px' }"`로 바꿔 계산된 실제 픽셀값을 인라인으로 박아넣었다.
+4. `npx vite build`로 컴파일 오류 없음을 확인했고, Node.js로 `updateStageSize`와 동일한 계산을 와이드 모니터·보통 노트북·거의 정사각형·세로로 긴 창 4가지 대표 화면 크기에 대해 시뮬레이션해, 모든 경우에 컨테이너 안에 정확히 들어맞으면서(overflow 없음) 목표 비율(28:47 ≈ 0.596)을 정확히 유지하는지 확인했다.
+
+**트러블슈팅**
+- 문제(이번 라운드의 근본 원인): CSS `aspect-ratio` + flex 중앙 정렬만으로 "비율 유지한 채 최대화"가 될 거라고 가정했는데, 확정 크기를 가진 시작점이 체인에 없어 정반대로(최소 크기로 쪼그라듦) 동작했다.
+- 원인: `aspect-ratio`가 실제로 어떻게 크기를 결정하는지(최소 한쪽 축의 확정값이 필요하다는 전제조건)를 검증하지 않고 "될 것"이라고 낙관적으로 가정한 채 구현했다. 빌드/서빙 확인만으로는 이런 시각적 레이아웃 버그를 잡을 수 없었고, 사용자가 실제 화면에서 확인해 준 덕분에 발견됐다.
+- 해결: CSS 엔진의 암묵적 크기 계산에 기대는 대신, 이미 JS로 추적하던 컨테이너 크기를 이용해 stage의 실제 픽셀 크기를 직접 계산하는 방식으로 바꿨다. 이번엔 사후 확인으로 계산식을 여러 화면 비율에 대해 Node.js로 시뮬레이션해, 배포 전에 수치적으로 검증했다.
+
+**결과**
+- 빌드 통과, 수정한 파일이 Vite에서 정상 컴파일·서빙됨을 확인했다.
+- `updateStageSize` 계산이 4가지 대표 화면 크기 전부에서 컨테이너를 넘치지 않으면서 목표 비율을 정확히 유지함을 Node.js로 확인했다.
+- (브라우저 자동화 도구 연결 불가로 실제 화면 확인은 사용자 몫으로 남음) 코드상으로는 지도가 화면 대부분을 차지하고 한반도 바깥으로 약간의 바다만 보이도록, 창 크기를 바꿔도 비율을 유지하며 다시 화면을 꽉 채우도록 구현했다.
+
+**느낀점**
+- "CSS가 알아서 해줄 것"이라는 가정은 특히 aspect-ratio·flex·grid가 얽힌 크기 계산에서는 위험하다는 걸 직접 겪었다. 각 속성이 "어떤 조건에서" 의도한 대로 동작하는지(이번엔 "최소 한쪽 축이 확정 크기여야 aspect-ratio가 계산된다"는 전제조건)를 검증하지 않고 넘어가면, 빌드는 통과하고 컴파일 오류도 없지만 실제 렌더링 결과는 완전히 다를 수 있다는 걸 이번에 뼈저리게 확인했다. 애매한 CSS 레이아웃 트릭보다, 이미 JS로 값을 들고 있다면 그 값으로 직접 계산하는 쪽이 더 예측 가능하고 디버깅하기도 쉽다는 교훈을 얻었다.
+- 브라우저로 직접 확인할 수 없는 제약 속에서 "빌드 통과 + 서빙 확인"만으로 "구현이 끝났다"고 말하는 게 얼마나 위험한지도 다시 느꼈다 — 이번처럼 레이아웃/시각적 결과가 핵심인 작업은 결국 사용자의 눈으로 확인받기 전까지는 절반만 검증된 것이라는 걸 인정하고, 다음부터는 이런 종류의 변경에 대해 더 명확하게 "시각적 확인 전까지는 추정"이라고 짚어야겠다.
+
+---
+
 <!--
 아래 형식을 복사해서 작업 단위마다 항목을 추가합니다.
 
