@@ -1515,6 +1515,62 @@
 
 ---
 
+## 21. GitHub Pages 배포
+
+**요구사항**
+- 지금까지 만든 프로젝트를 GitHub Pages(github.io)로 업로드해달라는 요청을 받았다.
+
+**사고 과정**
+- 체크리스트 마지막 남은 항목(`npm run build`·base 경로 확인·정적 배포)이 이걸로 완성되는 것이라, 이전 라운드(19번)에서 "사용자 행동이 필요하다"고 남겨둔 부분을 실제로 처리했다.
+- Vite로 빌드한 SPA를 GitHub Pages "프로젝트 페이지"(`https://<user>.github.io/skala-vue/`)로 올리려면 두 가지를 꼭 맞춰야 한다: (1) 정적 자산 경로가 저장소 이름 하위 경로(`/skala-vue/`)를 기준으로 나가도록 Vite `base`를 설정해야 하고, (2) Vue Router가 history 모드라 `/map`처럼 루트가 아닌 경로로 직접 접속하거나 새로고침하면 GitHub Pages 서버가 그 경로에 해당하는 정적 파일을 못 찾아 404를 낸다 — 이건 SPA를 정적 호스팅에 올릴 때 흔히 겪는 문제라, 널리 쓰이는 우회법(`index.html`을 `404.html`로도 복사해두면 GitHub Pages가 알 수 없는 경로에서 그 파일을 서빙해 브라우저에서 Vue Router가 라우팅을 이어받는다)을 그대로 적용했다. 라우터 자체를 hash 모드로 바꾸는 대안도 있었지만, 이미 채점된 3일차 Router 구현(history 모드)을 건드리지 않고 배포 설정만으로 해결하는 쪽을 택했다.
+- 배포 자동화는 `gh` CLI가 이미 이 저장소에 admin 권한으로 인증돼 있는 걸 확인하고, GitHub Actions 공식 Pages 배포 액션(`actions/upload-pages-artifact`, `actions/deploy-pages`)으로 워크플로를 구성한 뒤 `gh api`로 저장소의 Pages 설정 자체(빌드 방식을 "GitHub Actions"로)도 직접 활성화했다. OpenWeatherMap API Key는 사용자의 자격 증명이라 내가 값을 직접 다루지 않고(`.env`를 읽어 GitHub Secret에 넣는 행위를 하지 않음), 워크플로가 `secrets.VITE_OPENWEATHER_API_KEY`를 참조하도록만 해뒀다 — 등록하지 않아도 빌드/배포는 정상 진행되고, 방문자는 데모 데이터 토글로 둘러볼 수 있다.
+- 실제로 워크플로를 돌려보니 `npm ci`가 `ERESOLVE` 에러로 실패했다 — `package.json`의 `oxlint`(~1.74.0)와 `eslint-plugin-oxlint`(~1.73.0)가 요구하는 peer dependency 범위가 어긋나 있었다. 로컬에서는 이미 설치된 `node_modules`로 작업해왔고 `npm install`이 `npm ci`보다 관대해서 지금까지 드러나지 않았던, 이 작업과 무관하게 이미 존재하던 문제였다. 하지만 배포를 막고 있는 이상 그냥 넘어갈 수 없어서, `oxlint`를 `eslint-plugin-oxlint`가 이미 요구하던 범위(`~1.73.0`)에 맞춰 내렸다 — 최신 버전으로 둘 다 올리는 것보다 더 작은 변경이라 이쪽을 택했다.
+
+**해결 과정**
+1. `vite.config.js`에 GitHub Pages 하위 경로에 맞춘 `base`를 추가했다.
+
+   #### `src/../vite.config.js`
+   ```js
+   export default defineConfig({
+     base: '/skala-vue/',
+     // ...
+   })
+   ```
+2. 저장소 루트에 `.github/workflows/deploy.yml`을 새로 만들어, `main`에 푸시될 때마다 `skala-vue/` 안에서 빌드하고 GitHub Pages에 배포하도록 했다.
+
+   #### `.github/workflows/deploy.yml`
+   ```yaml
+   - run: npm ci
+   - run: npm run build
+     env:
+       VITE_OPENWEATHER_API_KEY: ${{ secrets.VITE_OPENWEATHER_API_KEY }}
+   - run: cp dist/index.html dist/404.html
+   - uses: actions/upload-pages-artifact@v3
+     with:
+       path: skala-vue/dist
+   ```
+3. `gh api -X POST repos/wodnjs2020136144/skala-vue/pages -f build_type=workflow`로 저장소의 Pages 설정을 "GitHub Actions로 빌드"로 활성화했다.
+4. 첫 배포 시도에서 `npm ci`가 실패한 걸 로그(`gh run view --log-failed`)로 확인하고, `package.json`의 `oxlint` 버전을 `~1.73.0`으로 내려 `eslint-plugin-oxlint`와 맞춘 뒤 `npm install`로 락파일을 재생성했다. 재생성된 락파일로 로컬에서 `npm ci`가 깨끗하게 성공하는지 먼저 확인한 뒤 커밋했다.
+5. 커밋을 다시 푸시해 워크플로를 재실행시켰고, `gh run watch`로 완료(성공)까지 지켜봤다. 배포된 사이트(`https://wodnjs2020136144.github.io/skala-vue/`)의 루트와, history 모드 라우팅이 걸리는 `/map` 하위 경로 둘 다 curl로 요청해 실제 앱의 `index.html`(정확한 `/skala-vue/` 자산 경로 포함)이 응답으로 오는지 확인했다.
+
+**트러블슈팅**
+- 문제: 배포 워크플로의 `npm ci`가 `ERESOLVE`로 실패했다.
+- 원인: `package.json`의 `oxlint`(~1.74.0)와 `eslint-plugin-oxlint`(~1.73.0)의 peer dependency 범위가 어긋나 있었다 — 이 작업 이전부터 존재하던 문제였는데, 로컬 `node_modules`가 이미 설치돼 있어 드러나지 않았을 뿐이었다.
+- 해결: `oxlint`를 `eslint-plugin-oxlint`가 요구하는 범위(`~1.73.0`)로 내리고 락파일을 재생성, 로컬 `npm ci`로 먼저 재현·검증한 뒤 반영했다. 이후 배포가 정상적으로 성공했다.
+- 문제: `/map`처럼 루트가 아닌 경로로 배포 사이트에 직접 접속하면 GitHub Pages가 404를 낼 수 있는 구조적 제약이 있었다(Vue Router history 모드 + 정적 호스팅의 흔한 충돌).
+- 해결: 라우터 모드를 바꾸는 대신, 빌드 결과의 `index.html`을 `404.html`로도 복사해 GitHub Pages가 이 파일을 폴백으로 서빙하게 했다 — curl로 실제 응답 본문이 (HTTP 상태 코드는 404이지만) 우리 앱의 `index.html`임을 확인해, 브라우저에서는 정상적으로 Vue Router가 라우팅을 이어받는 구조임을 검증했다.
+
+**결과**
+- `https://wodnjs2020136144.github.io/skala-vue/`에 배포 완료. GitHub Actions 워크플로가 `main` 푸시마다 자동으로 재배포한다.
+- 루트(`/`)와 하위 경로(`/map`) 둘 다 curl로 실제 앱 HTML이 응답됨을 확인했다(하위 경로는 404 폴백 메커니즘을 통해서임을 확인).
+- 체크리스트의 마지막 미완료 항목(빌드·base 경로·정적 배포)까지 모두 완료됨.
+
+**느낀점**
+- CI 환경(`npm ci`)이 로컬 개발 환경(`npm install`)보다 훨씬 엄격하다는 걸 실제로 겪었다 — 로컬에서 아무 문제 없이 잘 돌아가던 프로젝트도, 처음부터 깨끗하게 설치하는 CI에서는 잠재된 의존성 버전 불일치가 바로 드러난다. "로컬에서 되니까 괜찮다"가 아니라, 배포 파이프라인을 한 번은 반드시 실제로 돌려봐야 이런 문제를 미리 잡을 수 있다는 걸 다시 확인했다.
+- API Key처럼 사용자의 자격 증명이 필요한 상황에서, "내가 대신 처리해버리면 더 매끄러울 텐데"라는 유혹이 있었지만 값 자체를 직접 다루지 않고 참조만 걸어두는 선에서 멈춘 게 맞는 판단이었다고 생각한다 — 편의보다 경계를 지키는 쪽이 신뢰를 지키는 길이다.
+
+---
+
 <!--
 아래 형식을 복사해서 작업 단위마다 항목을 추가합니다.
 

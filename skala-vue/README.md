@@ -2,6 +2,8 @@
 
 Vue.js 강의 종합과제 — 픽셀/레트로 LED 전광판 컨셉의 날씨 대시보드입니다. 저장소 전체 소개는 [상위 폴더의 README](../README.md)를 참고하세요.
 
+🔗 **배포 페이지**: https://wodnjs2020136144.github.io/skala-vue/
+
 ## 로컬 실행
 
 ```bash
