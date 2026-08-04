@@ -6,11 +6,14 @@ import { useFavoritesStore } from '../stores/favoritesStore'
 import { useSearchStore } from '../stores/searchStore'
 import { useDemoStore } from '../stores/demoStore'
 import { CITY_LIST, fetchCurrentWeather, getDummyWeather } from '../services/weatherApi'
+import { useDraggable } from '../composables/useDraggable'
+import { useRegionGame } from '../composables/useRegionGame'
 import KoreaMapDots from '../components/practices/weather/KoreaMapDots.vue'
 import FavoriteHeartDots from '../components/practices/weather/FavoriteHeartDots.vue'
 import WeatherStatsPanel from '../components/practices/weather/WeatherStatsPanel.vue'
 import DotMatrixIcon from '../components/practices/weather/DotMatrixIcon.vue'
 import PixelTempIcon from '../components/practices/weather/PixelTempIcon.vue'
+import DotStatBar from '../components/practices/weather/DotStatBar.vue'
 import UnitToggler from '../components/UnitToggler.vue'
 
 const route = useRoute()
@@ -23,6 +26,7 @@ const cityList = ref([])
 const isLoading = ref(true)
 const loadError = ref('')
 const selectedId = ref(null)
+const mapDotsRef = ref(null)
 
 async function loadCities() {
   isLoading.value = true
@@ -48,6 +52,10 @@ onMounted(async () => {
     if (city) selectCityById(city)
   }
   window.addEventListener('resize', handleWindowResize)
+
+  // 게임 창의 초기 위치는 오른쪽 위 — 실제 렌더 크기를 아직 모르므로 대략적인 폭(240px)으로
+  // clamp해둔다. 이후 사용자가 드래그하면 그때 실측 크기로 다시 clamp된다.
+  gameWindowDrag.setPosition(window.innerWidth - GAME_WINDOW_WIDTH_ESTIMATE - 16, WINDOW_TOP_OFFSET, GAME_WINDOW_WIDTH_ESTIMATE, 200)
 })
 
 onUnmounted(() => {
@@ -88,27 +96,37 @@ const displayTemp = computed(() => {
     : selectedCity.value.temp
 })
 
-// 사이드 패널(즐겨찾기·순위)의 온도 표시도 ℃/℉ 전환을 반영한다.
+// 정보창(즐겨찾기·순위)의 온도 표시도 ℃/℉ 전환을 반영한다.
 function convertTemp(celsius) {
   return configStore.unit === 'imperial' ? Math.round((celsius * 9) / 5 + 32) : celsius
 }
 
-// 왼쪽 패널 — 즐겨찾기한 도시를 실시간 날씨(cityList)에서 찾아 보여준다.
+// 즐겨찾기한 도시를 실시간 날씨(cityList)에서 찾아 보여준다.
 const favoriteCitiesWithWeather = computed(() =>
   cityList.value.filter((city) => favoritesStore.isFavorite(city.id)),
 )
 
-// 오른쪽 패널 — 온도 기준 TOP3. WeatherHomeView의 hottestCity/coldestCity와 같은 계산을
-// 3개까지 확장한 것이다.
+// 온도 기준 TOP3. WeatherHomeView의 hottestCity/coldestCity와 같은 계산을 3개까지 확장한 것이다.
 const hottestThree = computed(() => [...cityList.value].sort((a, b) => b.temp - a.temp).slice(0, 3))
 const coldestThree = computed(() => [...cityList.value].sort((a, b) => a.temp - b.temp).slice(0, 3))
+
+// --- 드래그 가능한 창 3개 (정보창 · 게임창 · 도시 팝업) ---
+// 창 헤더 아래에 배치될 초기 y 좌표. 이 창들은 position:fixed(뷰포트 기준)라, nav 바(약
+// 57px)에 가려지지 않도록 처음엔 그 아래에서 시작한다. 사용자가 드래그하면 그 이후로는
+// 자유롭게 옮길 수 있다.
+const WINDOW_TOP_OFFSET = 76
+const GAME_WINDOW_WIDTH_ESTIMATE = 240
+
+const infoWindowDrag = useDraggable({ x: 16, y: WINDOW_TOP_OFFSET })
+const gameWindowDrag = useDraggable({ x: 16, y: WINDOW_TOP_OFFSET })
 
 const POPUP_MARGIN = 12
 // 실측 크기가 화면보다 커서 팝업을 통째로 축소해야 할 때, 글씨를 읽을 수 있는 최소 배율.
 const MIN_FIT_SCALE = 0.7
 
 const popupRef = ref(null)
-const popupPosition = ref({ left: '0px', top: '0px' })
+const popupDrag = useDraggable({ x: 0, y: 0 })
+const popupFitScale = ref(1)
 // 창 리사이즈 중에도 같은 지점을 중심으로 다시 계산하기 위해 마지막으로 연 좌표를 기억해둔다.
 let lastPopupCenter = null
 
@@ -116,9 +134,11 @@ let lastPopupCenter = null
 // 바뀔 때마다 다시 맞춰야 했던 문제를 없앤다. 클릭 지점(또는 화면 중앙)을 팝업의 중심으로
 // 두되, 실측 크기가 화면보다 크면 팝업 전체를 축소(fit-scale)해서 스크롤 없이 다 보이게
 // 한다. offsetHeight/Width는 transform의 영향을 받지 않으므로 트랜지션·스케일과 무관하게
-// 정확하다.
+// 정확하다. 새로 여는 팝업은 사용자가 이전에 드래그해 옮겼던 기록(hasMoved)을 초기화해
+// 다시 클릭 지점 기준으로 뜨게 한다.
 async function positionPopupAt(centerX, centerY) {
   lastPopupCenter = { x: centerX, y: centerY }
+  popupDrag.hasMoved.value = false
   await nextTick()
   const el = popupRef.value
   if (!el) return
@@ -128,12 +148,13 @@ async function positionPopupAt(centerX, centerY) {
   const availW = window.innerWidth - POPUP_MARGIN * 2
 
   const fitScale = Math.max(MIN_FIT_SCALE, Math.min(1, availH / rawH, availW / rawW))
+  popupFitScale.value = fitScale
   const h = rawH * fitScale
   const w = rawW * fitScale
 
   const left = Math.max(POPUP_MARGIN, Math.min(centerX - w / 2, window.innerWidth - w - POPUP_MARGIN))
   const top = Math.max(POPUP_MARGIN, Math.min(centerY - h / 2, window.innerHeight - h - POPUP_MARGIN))
-  popupPosition.value = { left: `${left}px`, top: `${top}px`, '--fit-scale': fitScale }
+  popupDrag.setPosition(left, top, w, h)
 }
 
 function selectCity({ city, rect }) {
@@ -151,12 +172,51 @@ function closePopup() {
   lastPopupCenter = null
 }
 
-// 팝업이 열린 채로 창 크기가 바뀌면 같은 중심 좌표로 위치·fit-scale을 다시 계산한다.
+// 팝업이 열린 채로 창 크기가 바뀌면: 사용자가 직접 옮긴 적이 없으면 클릭 지점 기준으로
+// 다시 계산하고, 이미 드래그로 옮긴 상태라면 그 위치는 존중하되 화면 밖으로 나가지 않게만
+// 다시 clamp한다.
 function handleWindowResize() {
+  if (!selectedCity.value) return
+  if (popupDrag.hasMoved.value) {
+    const el = popupRef.value
+    if (!el) return
+    const w = el.offsetWidth * popupFitScale.value
+    const h = el.offsetHeight * popupFitScale.value
+    popupDrag.setPosition(popupDrag.position.value.x, popupDrag.position.value.y, w, h)
+    return
+  }
   if (!lastPopupCenter) return
   positionPopupAt(lastPopupCenter.x, lastPopupCenter.y)
 }
 
+// --- "한반도 지역 찾기" 미니게임 ---
+const game = useRegionGame()
+
+function startGame() {
+  closePopup() // 게임 중엔 날씨 팝업이 화면을 가리지 않도록 미리 닫는다.
+  game.startGame()
+}
+
+// 게임이 진행 중일 때만 지도가 클릭을 map-pick으로 보낸다(KoreaMapDots의 gameActive prop).
+// 정답 위치에는 맞았든 틀렸든 burst 이펙트를 띄워 정답을 알려준다.
+function handleMapPick({ col, row }) {
+  const answer = game.submitGuess(col, row, (mapX, mapY) => mapDotsRef.value?.mapToColRow(mapX, mapY))
+  if (answer) mapDotsRef.value?.spawnBurst(answer.col, answer.row)
+}
+
+const formattedTimeLeft = computed(() => {
+  const total = Math.max(0, game.timeLeft.value)
+  const m = Math.floor(total / 60).toString().padStart(2, '0')
+  const s = (total % 60).toString().padStart(2, '0')
+  return `${m}:${s}`
+})
+
+// 라운드 결과에 반응하는 픽셀 마스코트 — 새 애셋을 만들지 않고 기존 날씨 아이콘을 재사용한다.
+const mascotCondition = computed(() => {
+  const result = game.lastResult.value
+  if (!result) return 'cloud'
+  return result.correct ? 'sun' : 'rain'
+})
 </script>
 
 <template>
@@ -166,67 +226,149 @@ function handleWindowResize() {
 
     <template v-else>
       <div class="weather-map__body">
-        <aside class="weather-map__side weather-map__side--left">
-          <h2 class="weather-map__side-title">
-            <FavoriteHeartDots :active="true" :size="14" /> 즐겨찾기
-          </h2>
-          <button
-            v-for="city in favoriteCitiesWithWeather"
-            :key="city.id"
-            class="weather-map__side-item"
-            @click="selectCityById(city)"
-          >
-            <DotMatrixIcon :condition="city.condition" size="sm" :animated="false" />
-            <span class="weather-map__side-name">{{ city.name }}</span>
-            <span class="weather-map__side-temp">{{ convertTemp(city.temp) }}°</span>
-          </button>
-          <p v-if="favoriteCitiesWithWeather.length === 0" class="weather-map__side-empty">
-            즐겨찾기한 도시가 없어요
-          </p>
-        </aside>
-
         <div class="weather-map__grid-area">
-          <KoreaMapDots :cities="cityList" :selected-id="selectedId" @select-city="selectCity" />
+          <KoreaMapDots
+            ref="mapDotsRef"
+            :cities="cityList"
+            :selected-id="selectedId"
+            :game-active="game.status.value === 'playing'"
+            @select-city="selectCity"
+            @map-pick="handleMapPick"
+          />
         </div>
 
-        <aside class="weather-map__side weather-map__side--right">
-          <h2 class="weather-map__side-title">오늘의 순위</h2>
-          <p class="weather-map__side-subtitle">
-            <PixelTempIcon variant="hot" :size="14" /> 가장 더운 지역
-          </p>
-          <button
-            v-for="(city, index) in hottestThree"
-            :key="city.id"
-            class="weather-map__side-item"
-            @click="selectCityById(city)"
-          >
-            <span class="weather-map__side-rank">{{ index + 1 }}</span>
-            <span class="weather-map__side-name">{{ city.name }}</span>
-            <span class="weather-map__side-temp">{{ convertTemp(city.temp) }}°</span>
-          </button>
-          <p class="weather-map__side-subtitle">
-            <PixelTempIcon variant="cold" :size="14" /> 가장 추운 지역
-          </p>
-          <button
-            v-for="(city, index) in coldestThree"
-            :key="city.id"
-            class="weather-map__side-item"
-            @click="selectCityById(city)"
-          >
-            <span class="weather-map__side-rank">{{ index + 1 }}</span>
-            <span class="weather-map__side-name">{{ city.name }}</span>
-            <span class="weather-map__side-temp">{{ convertTemp(city.temp) }}°</span>
-          </button>
-        </aside>
+        <!-- 정보창: 즐겨찾기 + 오늘의 순위를 한 창에 통합. 드래그하려면 헤더를 잡고 끈다. -->
+        <div
+          class="map-window map-window--info"
+          data-draggable-window
+          :style="{ left: `${infoWindowDrag.position.value.x}px`, top: `${infoWindowDrag.position.value.y}px` }"
+        >
+          <div class="map-window__header" @pointerdown="infoWindowDrag.startDrag">
+            <FavoriteHeartDots :active="true" :size="14" />
+            <span>즐겨찾기 · 오늘의 순위</span>
+          </div>
+          <div class="map-window__body">
+            <section class="map-window__section">
+              <h3 class="map-window__section-title">즐겨찾기</h3>
+              <button
+                v-for="city in favoriteCitiesWithWeather"
+                :key="city.id"
+                class="map-window__item"
+                @click="selectCityById(city)"
+              >
+                <DotMatrixIcon :condition="city.condition" size="sm" :animated="false" />
+                <span class="map-window__item-name">{{ city.name }}</span>
+                <span class="map-window__item-temp">{{ convertTemp(city.temp) }}°</span>
+              </button>
+              <p v-if="favoriteCitiesWithWeather.length === 0" class="map-window__empty">
+                즐겨찾기한 도시가 없어요
+              </p>
+            </section>
+
+            <section class="map-window__section">
+              <h3 class="map-window__section-title">오늘의 순위</h3>
+              <p class="map-window__subtitle">
+                <PixelTempIcon variant="hot" :size="14" /> 가장 더운 지역
+              </p>
+              <button
+                v-for="(city, index) in hottestThree"
+                :key="city.id"
+                class="map-window__item"
+                @click="selectCityById(city)"
+              >
+                <span class="map-window__rank">{{ index + 1 }}</span>
+                <span class="map-window__item-name">{{ city.name }}</span>
+                <span class="map-window__item-temp">{{ convertTemp(city.temp) }}°</span>
+              </button>
+              <p class="map-window__subtitle">
+                <PixelTempIcon variant="cold" :size="14" /> 가장 추운 지역
+              </p>
+              <button
+                v-for="(city, index) in coldestThree"
+                :key="city.id"
+                class="map-window__item"
+                @click="selectCityById(city)"
+              >
+                <span class="map-window__rank">{{ index + 1 }}</span>
+                <span class="map-window__item-name">{{ city.name }}</span>
+                <span class="map-window__item-temp">{{ convertTemp(city.temp) }}°</span>
+              </button>
+            </section>
+          </div>
+        </div>
+
+        <!-- 게임창: 한반도 지역 찾기. 게임 시작을 누르면 지도 자체가 게임판이 된다. -->
+        <div
+          class="map-window map-window--game"
+          data-draggable-window
+          :style="{ left: `${gameWindowDrag.position.value.x}px`, top: `${gameWindowDrag.position.value.y}px` }"
+        >
+          <div class="map-window__header" @pointerdown="gameWindowDrag.startDrag">
+            <span>🎮 한반도 지역 찾기</span>
+          </div>
+          <div class="map-window__body map-window__body--game">
+            <template v-if="game.status.value === 'idle'">
+              <p class="game-window__desc">
+                지도에서 문제로 나온 지역을 클릭해서 맞혀보세요! 5문제, 제한시간 60초.
+              </p>
+              <p class="game-window__best">최고 기록: {{ game.bestScore.value }}점</p>
+              <button class="game-window__start-btn" @pointerdown.stop @click="startGame">게임 시작</button>
+            </template>
+
+            <template v-else-if="game.status.value === 'playing'">
+              <DotMatrixIcon :condition="mascotCondition" size="sm" :animated="true" />
+              <p class="game-window__prompt">찾아라! <strong>{{ game.currentRegion.value?.name }}</strong></p>
+              <DotStatBar
+                label="남은 시간"
+                :value="(game.timeLeft.value / game.timeLimit) * 100"
+                :display-value="formattedTimeLeft"
+              />
+              <p class="game-window__stats">
+                점수 {{ game.score.value }} · {{ game.roundIndex.value + 1 }}/{{ game.totalRounds }} · 콤보 {{ game.combo.value }}
+              </p>
+              <p
+                v-if="game.lastResult.value"
+                class="game-window__feedback"
+                :class="{ 'is-correct': game.lastResult.value.correct }"
+              >
+                {{
+                  game.lastResult.value.correct
+                    ? `정답! +${game.lastResult.value.points}`
+                    : `아쉬워요 — ${game.lastResult.value.region.name}였어요`
+                }}
+              </p>
+            </template>
+
+            <template v-else-if="game.status.value === 'finished'">
+              <DotMatrixIcon condition="sun" size="sm" :animated="true" />
+              <p class="game-window__result">최종 점수 {{ game.score.value }}점</p>
+              <p class="game-window__best">
+                최고 기록 {{ game.bestScore.value }}점
+                <span v-if="game.score.value > 0 && game.score.value === game.bestScore.value"> — 신기록!</span>
+              </p>
+              <button class="game-window__start-btn" @pointerdown.stop @click="startGame">다시 하기</button>
+            </template>
+          </div>
+        </div>
       </div>
 
       <Transition name="popup">
         <div v-if="selectedCity" class="popup-backdrop" @click="closePopup">
-          <div ref="popupRef" class="weather-popup" :style="popupPosition" @click.stop>
+          <div
+            ref="popupRef"
+            class="weather-popup"
+            data-draggable-window
+            :style="{
+              left: `${popupDrag.position.value.x}px`,
+              top: `${popupDrag.position.value.y}px`,
+              '--fit-scale': popupFitScale,
+            }"
+            @click.stop
+          >
             <div class="weather-popup__inner">
-              <div class="weather-popup__head">
+              <div class="weather-popup__head" @pointerdown="popupDrag.startDrag">
                 <p class="weather-popup__name">{{ selectedCity.name }}</p>
-                <div class="weather-popup__head-actions">
+                <div class="weather-popup__head-actions" @pointerdown.stop>
                   <UnitToggler />
                   <button
                     class="weather-popup__fav-btn"
@@ -274,45 +416,61 @@ function handleWindowResize() {
   inset: 0;
 }
 
-/* 좌우 사이드 패널 — 즐겨찾기 / 온도 TOP3 순위. 지도 폭을 줄이는 고정 컬럼이 아니라,
-   바다 배경 위에 뜨는 게임 배너/이벤트창처럼 지도 위를 덮어 띄운다. 팝업(z-index:50)
+/* 드래그 가능한 창의 공통 뼈대 — 정보창·게임창이 함께 쓴다. position:fixed로 둬서
+   드래그 좌표(뷰포트 기준 clientX/clientY 델타)와 좌표계가 일치한다. 팝업(z-index:50)
    보다는 낮게 둬서 팝업이 항상 그 위에 보인다. */
-.weather-map__side {
-  position: absolute;
-  top: 16px;
-  bottom: 16px;
-  width: 220px;
+.map-window {
+  position: fixed;
   z-index: 10;
-  padding: 16px 12px;
+  width: 220px;
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
   background: var(--paper);
   border-radius: 16px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+
+.map-window__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  background: var(--ink);
+  color: var(--paper);
+  font-family: var(--font-pixel-kr);
+  font-size: 13px;
+  letter-spacing: 0.05em;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.map-window__header:active {
+  cursor: grabbing;
+}
+
+.map-window__body {
+  padding: 12px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
-.weather-map__side--left {
-  left: 16px;
+.map-window__section + .map-window__section {
+  margin-top: 12px;
 }
 
-.weather-map__side--right {
-  right: 16px;
-}
-
-.weather-map__side-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+.map-window__section-title {
   margin: 0 0 8px;
   font-family: var(--font-pixel-kr);
-  font-size: 14px;
+  font-size: 13px;
   color: var(--ink);
-  letter-spacing: 0.05em;
 }
 
-.weather-map__side-subtitle {
+.map-window__subtitle {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -322,10 +480,11 @@ function handleWindowResize() {
   color: var(--moss);
 }
 
-.weather-map__side-item {
+.map-window__item {
   display: flex;
   align-items: center;
   gap: 8px;
+  width: 100%;
   border: none;
   background: rgba(0, 0, 0, 0.04);
   border-radius: 8px;
@@ -334,11 +493,11 @@ function handleWindowResize() {
   text-align: left;
 }
 
-.weather-map__side-item:hover {
+.map-window__item:hover {
   background: rgba(0, 0, 0, 0.08);
 }
 
-.weather-map__side-rank {
+.map-window__rank {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -352,29 +511,97 @@ function handleWindowResize() {
   font-size: 10px;
 }
 
-.weather-map__side-name {
+.map-window__item-name {
   flex: 1;
   font-family: var(--font-pixel-kr);
   font-size: 12px;
   color: var(--ink);
 }
 
-.weather-map__side-temp {
+.map-window__item-temp {
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--amber);
 }
 
-.weather-map__side-empty {
+.map-window__empty {
   margin: 0;
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--moss);
 }
 
-/* 좁은 화면에서는 지도가 눌리지 않도록 사이드 패널을 숨긴다 */
+/* 게임창 내부 — 아이콘/문구/게이지가 세로로 쌓이고 가운데 정렬된다. */
+.map-window__body--game {
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+}
+
+.game-window__desc {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink);
+  line-height: 1.5;
+}
+
+.game-window__best {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--moss);
+}
+
+.game-window__start-btn {
+  margin-top: 4px;
+  border: none;
+  border-radius: 10px;
+  background: var(--amber);
+  color: var(--ink);
+  font-family: var(--font-pixel-kr);
+  font-size: 13px;
+  padding: 10px 20px;
+  cursor: pointer;
+}
+
+.game-window__prompt {
+  margin: 0;
+  width: 100%;
+  font-family: var(--font-pixel-kr);
+  font-size: 14px;
+  color: var(--ink);
+}
+
+.game-window__stats {
+  margin: 0;
+  width: 100%;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--moss);
+}
+
+.game-window__feedback {
+  margin: 0;
+  font-family: var(--font-pixel-kr);
+  font-size: 13px;
+  color: var(--amber);
+}
+
+.game-window__feedback.is-correct {
+  color: var(--moss);
+}
+
+.game-window__result {
+  margin: 0;
+  font-family: var(--font-pixel-kr);
+  font-size: 16px;
+  color: var(--ink);
+}
+
+/* 좁은 화면에서는 지도가 눌리지 않도록 정보창·게임창을 숨긴다 */
 @media (max-width: 1000px) {
-  .weather-map__side {
+  .map-window {
     display: none;
   }
 }
@@ -443,12 +670,20 @@ function handleWindowResize() {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.weather-popup__head:active {
+  cursor: grabbing;
 }
 
 .weather-popup__head-actions {
   display: flex;
   align-items: center;
   gap: 12px;
+  cursor: default;
 }
 
 .weather-popup__name {

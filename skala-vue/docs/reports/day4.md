@@ -1023,6 +1023,153 @@
 
 ---
 
+## 16. 드래그 가능한 창 시스템 + "한반도 지역 찾기" 미니게임
+
+**요구사항**
+- 즐겨찾기·오늘의 순위·도시 팝업 창을 드래그해서 위치를 옮길 수 있게 한다. 이를 구현하기 전, 즐겨찾기와 오늘의 순위를 한 창으로 합친다.
+- 사이트 컨셉(픽셀 + 날씨)에 맞는 미니게임을 추가한다. 게임은 픽셀 형태여야 하고, 날씨 사이트 컨셉에 맞아야 한다. 지도 탭에서 만들지 새 페이지로 만들지도 고민해서 방안을 제시한다.
+- (사용자와 협의 결과) 게임은 **"한반도 지역 찾기"**(지도 위 문제 지역을 클릭해서 맞히는 게임)로 확정, **지도 탭 안의 드래그 가능한 창**에서 "게임 시작"을 누르면 지도 자체가 게임판이 되는 형태로 확정. 문제로 나올 지역은 기존 주요 도시(9곳)보다 많아야 하고, 창에는 남은 시간·점수 등 재밌는 오브젝트를 배치한다.
+
+**사고 과정**
+- 미니게임 아이디어는 3가지(픽셀 우산 받기 액션 게임, 두 도시 날씨 비교 퀴즈, 지도에서 도시 찾기)를 제시했고, 사용자가 "지도에서 도시 찾기"를 골랐다. 이 선택은 결과적으로 구현도 가장 효율적이었다 — 게임 좌표계·픽셀 렌더링·burst 이펙트를 이미 만든 `KoreaMapDots`에서 그대로 재사용할 수 있고, 액션 게임처럼 새로운 입력 루프나 비교 퀴즈처럼 API 데이터 의존적인 로직을 새로 설계할 필요가 없었다. 배치도 "지도 탭 안의 드래그 창 + 지도 자체가 게임판"으로 정해져, 새 페이지(/game)를 만들 때 생기는 라우팅·레이아웃 중복 없이 기존 지도 인터랙션(줌·팬·파동·burst) 위에 게임 모드만 얹으면 됐다.
+- 드래그를 3개 창(정보창·게임창·팝업)에 각각 따로 구현하면 중복이 크고, 팝업은 이미 실측 기반 위치 계산(`positionPopupAt`, fit-scale)을 갖고 있어 단순 래퍼 컴포넌트로 감싸면 그 로직과 부딪힌다고 판단했다. 그래서 **컴포저블**(`useDraggable`)로 좌표 상태(`position`)와 드래그 이벤트 처리만 분리하고, 렌더링 방식은 강요하지 않는 방식을 택했다 — 정보창/게임창은 `position.value`를 그대로 style에 바인딩하고, 팝업은 기존 `positionPopupAt`이 계산한 좌표를 `popupDrag.setPosition()`으로 밀어넣는 식으로 기존 로직을 유지한 채 드래그만 얹었다. `hasMoved` 플래그를 둬서, 사용자가 한 번이라도 드래그한 팝업은 창 리사이즈 시 자동 재배치가 그 위치를 덮어쓰지 않고 화면 안에만 다시 clamp하도록 했다(반대로 매번 새 도시를 선택하면 `hasMoved`를 초기화해 클릭 지점 기준으로 다시 뜬다).
+- 게임 지역 데이터는 `CITY_LIST`에 추가하지 않고 별도 파일(`gameRegions.js`)로 분리했다 — `CITY_LIST`는 실제 OpenWeatherMap API 호출 대상이라 항목이 늘면 지도/홈 화면 진입마다 API 요청이 그만큼 늘고, 홈 화면 카드 목록도 게임과 무관하게 길어지기 때문이다. 게임은 좌표만 있으면 되므로 날씨 데이터가 필요 없는 가벼운 목록으로 뒀다. 좌표는 `KOREA_MATRIX`(육지/바다 이진 그리드)에 정확히 육지 칸으로 떨어져야 게임이 정상 동작하므로, 후보 좌표를 전부 Node.js로 직접 검증한 뒤에야 파일에 반영했다(처음 계산에서 그리드 폭을 22가 아니라 23으로 착각해 강릉·속초 좌표가 바다에 찍히는 걸 검증 단계에서 미리 잡아냈다 — 아래 트러블슈팅 참고).
+- 게임 상태(점수·라운드·타이머·최고 기록)는 뷰 컴포넌트에 직접 두지 않고 `useRegionGame` 컴포저블로 분리했다. `WeatherMapView.vue`가 이미 지도·팝업·정보창·드래그 로직으로 커지고 있어서, 게임 로직까지 그 파일에 얹으면 가독성이 떨어진다고 판단했다.
+- 게임 중 도시 도트를 클릭하면 원래 날씨 팝업이 뜨는데, 게임 진행을 방해하므로 `gameActive` prop을 추가해 게임 중에는 모든 도트 클릭이 `map-pick`(정답 판정)으로 가고 `select-city`(팝업)는 나가지 않게 분기했다. 정답 위치를 알려줄 때는 새 이펙트를 만들지 않고 직전 라운드에 만든 `spawnBurst`를 그대로 재사용했다 — "폭발 이펙트로 위치를 알려준다"는 용도가 정확히 burst의 기존 의미와 맞아떨어졌다.
+
+**해결 과정**
+1. 드래그 공용 로직을 `src/composables/useDraggable.js`로 새로 만들었다. Pointer Events(`pointerdown`/`pointermove`/`pointerup`)를 `window`에 등록해 마우스·터치를 함께 처리하고, 뷰포트 밖으로 나가지 않도록 매번 clamp한다.
+
+   #### `src/composables/useDraggable.js`
+   ```js
+   export function clampToViewport(x, y, width, height) {
+     const maxX = window.innerWidth - width - MARGIN
+     const maxY = window.innerHeight - height - MARGIN
+     return {
+       x: Math.min(Math.max(x, MARGIN), Math.max(MARGIN, maxX)),
+       y: Math.min(Math.max(y, MARGIN), Math.max(MARGIN, maxY)),
+     }
+   }
+   export function useDraggable(initial = { x: 0, y: 0 }) {
+     const position = ref({ x: initial.x, y: initial.y })
+     const hasMoved = ref(false)
+     function startDrag(event) {
+       const rect = event.currentTarget.closest('[data-draggable-window]')?.getBoundingClientRect()
+       elWidth = rect.width; elHeight = rect.height
+       pointerId = event.pointerId
+       startPointerX = event.clientX; startPointerY = event.clientY
+       startX = position.value.x; startY = position.value.y
+       hasMoved.value = true
+       window.addEventListener('pointermove', handlePointerMove)
+       window.addEventListener('pointerup', handlePointerUp)
+     }
+     function setPosition(x, y, width = elWidth, height = elHeight) {
+       position.value = clampToViewport(x, y, width, height)
+     }
+     return { position, hasMoved, startDrag, setPosition }
+   }
+   ```
+2. `src/views/WeatherMapView.vue`에서 기존 좌/우 `<aside>` 두 개를 하나의 `.map-window--info`로 통합하고(즐겨찾기 섹션 → 오늘의 순위 섹션 순서, 계산 로직은 그대로 재사용), 게임창(`.map-window--game`)을 새로 추가했다. 둘 다 헤더에 `@pointerdown="xxxDrag.startDrag"`를 걸어 헤더를 잡고 끌면 옮겨진다. 도시 팝업도 헤더(`weather-popup__head`)에 같은 방식으로 드래그를 걸되, 액션 버튼 영역(`weather-popup__head-actions`)에는 `@pointerdown.stop`을 둬서 버튼 클릭이 드래그로 오인되지 않게 했다.
+
+   #### `src/views/WeatherMapView.vue`
+   ```js
+   async function positionPopupAt(centerX, centerY) {
+     lastPopupCenter = { x: centerX, y: centerY }
+     popupDrag.hasMoved.value = false
+     await nextTick()
+     const el = popupRef.value
+     // ...실측 기반 fit-scale 계산은 기존과 동일...
+     popupDrag.setPosition(left, top, w, h)
+   }
+   function handleWindowResize() {
+     if (!selectedCity.value) return
+     if (popupDrag.hasMoved.value) {
+       // 사용자가 옮긴 팝업은 위치를 존중하고 화면 밖으로만 안 나가게 다시 clamp한다.
+       const el = popupRef.value
+       const w = el.offsetWidth * popupFitScale.value
+       const h = el.offsetHeight * popupFitScale.value
+       popupDrag.setPosition(popupDrag.position.value.x, popupDrag.position.value.y, w, h)
+       return
+     }
+     if (lastPopupCenter) positionPopupAt(lastPopupCenter.x, lastPopupCenter.y)
+   }
+   ```
+3. 게임 지역 목록을 `src/services/gameRegions.js`에 새로 만들었다. `CITY_LIST`의 9개 도시(좌표째 재사용)에 12개 지역(춘천·강릉·속초·원주·청주·전주·목포·여수·포항·안동·창원·천안)을 더해 총 21곳으로 구성했다.
+
+   #### `src/services/gameRegions.js`
+   ```js
+   export const GAME_REGION_LIST = [
+     ...CITY_LIST.map((city) => ({ id: `game_${city.id}`, name: city.name, mapX: city.mapX, mapY: city.mapY })),
+     { id: 'region_chuncheon', name: '춘천', mapX: 0.568, mapY: 0.524 },
+     { id: 'region_gangneung', name: '강릉', mapX: 0.705, mapY: 0.598 },
+     // ... 이하 10곳
+   ]
+   ```
+4. 게임 상태 기계를 `src/composables/useRegionGame.js`로 새로 만들었다. `startGame()`이 21곳 중 5곳을 무작위로 뽑아 60초 타이머를 시작하고, `submitGuess(col, row, toColRow)`가 클릭 칸과 정답 칸의 거리로 채점한다(거리 0이면 200점 만점, 허용 반경 2.5칸을 넘으면 오답).
+
+   #### `src/composables/useRegionGame.js`
+   ```js
+   function submitGuess(col, row, toColRow) {
+     const region = currentRegion.value
+     const answer = toColRow(region.mapX, region.mapY)
+     const distance = Math.hypot(col - answer.col, row - answer.row)
+     const correct = distance <= TOLERANCE
+     const points = correct ? Math.round(MAX_ROUND_SCORE * (1 - distance / TOLERANCE)) : 0
+     if (correct) { combo.value += 1; score.value += points } else { combo.value = 0 }
+     lastResult.value = { correct, points, region }
+     // ...다음 라운드로 진행, 마지막 라운드면 finishGame()...
+     return answer
+   }
+   ```
+5. `src/components/practices/weather/KoreaMapDots.vue`에 `gameActive` prop, `map-pick` emit, `mapToColRow(mapX, mapY)`(도시 배치와 완전히 같은 공식 재사용)를 추가하고 `spawnBurst`와 함께 `defineExpose`로 부모에 노출했다. `handleDotClick`이 `gameActive`면 `map-pick`을, 아니면 기존처럼 도시일 때만 `select-city`를 내도록 분기했다.
+
+   #### `src/components/practices/weather/KoreaMapDots.vue`
+   ```js
+   function handleDotClick(dot, event) {
+     if (props.gameActive) {
+       emit('map-pick', { col: dot.col, row: dot.row })
+       return
+     }
+     if (dot.city) handleCityDotClick(dot, event)
+   }
+   function mapToColRow(mapX, mapY) {
+     const localCol = Math.round(mapX * GRID_W - 0.5)
+     const localRow = Math.round(mapY * GRID_H - 0.5)
+     return { col: koreaOffsetCol + localCol, row: koreaOffsetRow + localRow }
+   }
+   defineExpose({ spawnBurst, mapToColRow })
+   ```
+6. `WeatherMapView.vue`에 게임창 UI(대기/진행/종료 3단계)를 추가했다. 진행 중에는 남은 시간을 새 게이지 없이 기존 `DotStatBar`로, 결과 마스코트는 새 애셋 없이 기존 `DotMatrixIcon`(정답=sun, 오답=rain, 대기=cloud)으로 표시한다. 정답 판정은 `handleMapPick`이 처리한다.
+
+   ```js
+   function handleMapPick({ col, row }) {
+     const answer = game.submitGuess(col, row, (mapX, mapY) => mapDotsRef.value?.mapToColRow(mapX, mapY))
+     if (answer) mapDotsRef.value?.spawnBurst(answer.col, answer.row)
+   }
+   ```
+7. 게임 중 도시 도트에 마우스를 올리면 뜨던 이름 말풍선(`handleCityHover`)이 정답을 미리 알려주는 구멍이라는 걸 구현 중 알아채고, `@mouseenter="dot.city && !gameActive && handleCityHover(dot, $event)"`로 게임 중에는 아예 막았다. 게임이 막 시작되는 순간 이미 뜬 말풍선이 남아있을 수 있어 `watch(() => props.gameActive, ...)`로 게임 시작 시 즉시 지우는 것도 추가했다.
+8. `npx vite build`로 컴파일 오류 없음을 확인하고, 개발 서버를 임시로 띄워 신규/수정 파일 5개(`WeatherMapView.vue`, `KoreaMapDots.vue`, `useDraggable.js`, `useRegionGame.js`, `gameRegions.js`) 전부 200으로 정상 서빙됨을 확인했다. `WeatherMapView.vue`가 Vite 컴파일 산출물에서 `setup()` 반환 객체에 모든 바인딩(게임 상태, 드래그 핸들러 등)이 빠짐없이 포함돼 있는지 직접 확인해 참조 누락이 없음을 검증했다. 채점 곡선(거리별 점수)과 `mapToColRow`가 `buildGrid`의 도시 배치 공식과 완전히 동일한지도 Node.js/grep으로 별도 검증했다.
+
+**트러블슈팅**
+- 문제: `gameRegions.js`의 좌표를 처음 계산할 때 `KOREA_MATRIX`의 각 행 문자열 길이를 23으로 잘못 가정해서(`GRID_W`는 실제로 22), 강릉·속초 후보 좌표가 육지가 아니라 바다 칸에 떨어졌다.
+- 원인: 그리드 폭 상수(`GRID_W = 22`)를 코드에서 직접 확인하지 않고 어림으로 셈해 인덱스 계산이 하나씩 밀렸다.
+- 해결: 좌표를 파일에 반영하기 전에 Node.js로 21곳 전체를 `KOREA_MATRIX`에 대입해 전부 `'1'`(육지)인지 자동 검증하는 스크립트를 먼저 돌렸고, 이 검증에서 두 곳의 불일치를 바로 잡아냈다. 실제 코드(`gameRegions.js`)에는 검증을 통과한 좌표만 반영했다.
+- 문제: 이번에도 Chrome 브라우저 자동화 확장이 연결되지 않아(`tabs_context_mcp` 호출 시 "Browser extension is not connected") 드래그 동작, 게임 흐름(문제 표시 → 클릭 → 정답 판정 → burst)을 실제 화면에서 확인하지 못했다.
+- 원인: 이전 라운드들과 동일한 브라우저 확장 연결 문제(원인 미상, 세션 내내 지속).
+- 해결: 빌드 통과, 개발 서버 curl 확인(신규/수정 파일 5개 모두 200 정상 서빙, 컴파일 산출물의 `setup()` 반환 객체에 참조 누락 없음 확인), 채점 곡선·좌표 변환 공식 일치 여부를 Node.js/grep으로 검증하는 것까지만 내가 확인할 수 있는 범위였다. 실제 드래그감, 게임 플레이 흐름은 사용자에게 확인을 요청했다.
+
+**결과**
+- 빌드 통과, 신규/수정 파일 모두 Vite에서 정상 컴파일·서빙됨을 확인했다.
+- 게임 채점 곡선이 의도한 대로(정확히 맞히면 200점 만점, 허용 반경 2.5칸 경계에서 0점에 수렴, 그 밖은 오답) 동작함을 Node.js로 확인했다.
+- 21개 게임 지역 좌표 전부가 한반도 매트릭스의 육지 칸에 정확히 떨어짐을 Node.js 검증으로 확인했다(검증 과정에서 발견한 강릉·속초 좌표 오류를 수정 반영).
+- (브라우저 자동화 도구 연결 불가로 실제 화면 확인은 사용자 몫으로 남음) 코드상으로는 정보창(즐겨찾기+순위 통합)·게임창·도시 팝업 모두 헤더를 잡고 끌 수 있고, 게임 시작 시 지도가 게임판이 되어 클릭한 칸과 정답 칸의 거리로 채점하며 정답 위치에 burst 이펙트가 뜨도록 구현했다.
+
+**느낀점**
+- 좌표처럼 "코드로 검증 가능한데 눈으로만 확인하면 놓치기 쉬운" 값은, 화면을 못 보는 상황에서도(혹은 볼 수 있어도) 스크립트로 전수 검증하는 게 훨씬 믿을 만하다는 걸 체감했다. 실제로 그리드 폭을 잘못 가정한 실수를 화면 없이도 검증 단계에서 바로 잡아낼 수 있었다 — "일단 그럴듯해 보이니 넘어가자"가 아니라 사전에 정의한 불변 조건(모든 게임 좌표는 육지여야 한다)을 기계적으로 확인하는 습관이 중요하다는 걸 다시 느꼈다.
+- 컴포저블로 로직을 분리할 때 "무엇을 강요하지 않을 것인가"를 먼저 정하는 게 중요했다 — `useDraggable`이 렌더링 방식이나 위치 계산 로직 자체를 강요하지 않고 좌표 상태와 이벤트만 다뤘기 때문에, 이미 복잡한 자체 위치 계산(fit-scale)을 가진 팝업에도 억지로 끼워 맞추지 않고 자연스럽게 얹을 수 있었다. 재사용 가능한 로직을 뽑아낼 때는 "이 기능이 필요로 하지 않는 것까지 떠안기지 않는다"는 기준이 유용했다.
+
+---
+
 <!--
 아래 형식을 복사해서 작업 단위마다 항목을 추가합니다.
 

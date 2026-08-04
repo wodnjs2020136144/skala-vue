@@ -10,9 +10,15 @@ const props = defineProps({
     type: String,
     default: null,
   },
+  // "한반도 지역 찾기" 게임 진행 중에는 도시 도트뿐 아니라 모든 칸이 클릭 가능해지고,
+  // 클릭이 select-city 대신 map-pick으로 나간다(게임 중엔 날씨 팝업이 뜨면 방해된다).
+  gameActive: {
+    type: Boolean,
+    default: false,
+  },
 })
 
-const emit = defineEmits(['select-city'])
+const emit = defineEmits(['select-city', 'map-pick'])
 
 // 참고 이미지(한반도 도트 아트)를 픽셀 단위로 분석해 그대로 옮긴 매트릭스.
 // 22x41 배열이며, 1이 육지다. 울릉도/독도/제주 등도 포함돼 있다.
@@ -124,6 +130,14 @@ const cols = ref(0)
 const rows = ref(0)
 const dots = ref([])
 const hoveredDot = ref(null)
+// 게임이 시작되는 순간 도시 이름을 알려주는 말풍선이 남아있으면 정답을 미리 알려주는 셈이라
+// 즉시 지운다(이후 mouseenter는 gameActive 동안 아예 막힌다).
+watch(
+  () => props.gameActive,
+  (active) => {
+    if (active) hoveredDot.value = null
+  },
+)
 const tooltipPos = ref({ left: 0, top: 0 })
 
 // 파동 계산에서 문자열 키를 쓰지 않기 위한 평면 인덱스(= dot.index) 기반 버퍼.
@@ -132,6 +146,11 @@ let landMask = new Uint8Array(0)
 let frameScratch = new Float32Array(0)
 // burst(선택 폭발) 전용 버퍼 — 파동/프레스와 달리 육지·바다 구분 없이 모든 칸에 적용된다.
 let burstScratch = new Float32Array(0)
+// 한반도 매트릭스가 그리드 안에서 그려지는 오프셋 — 컨테이너 크기에 따라 buildGrid에서
+// 갱신된다. 게임 모드의 mapToColRow가 이 값을 그대로 재사용해, 화면 크기가 달라져도
+// city.mapX/mapY → 실제 칸 좌표 변환이 항상 buildGrid와 같은 결과를 내도록 한다.
+let koreaOffsetCol = 0
+let koreaOffsetRow = 0
 
 function buildGrid(width, height) {
   const newCols = Math.max(1, Math.round(width / DOT_PX))
@@ -139,8 +158,8 @@ function buildGrid(width, height) {
   cols.value = newCols
   rows.value = newRows
 
-  const koreaOffsetCol = Math.floor((newCols - GRID_W) / 2)
-  const koreaOffsetRow = Math.floor((newRows - GRID_H) / 2)
+  koreaOffsetCol = Math.floor((newCols - GRID_W) / 2)
+  koreaOffsetRow = Math.floor((newRows - GRID_H) / 2)
 
   const cityByKey = new Map()
   props.cities.forEach((city) => {
@@ -603,6 +622,28 @@ function handleCityDotClick(dot, event) {
   emit('select-city', { city: dot.city, rect: event.currentTarget.getBoundingClientRect() })
 }
 
+// 게임 진행 중에는 도시 여부와 무관하게 모든 칸 클릭이 map-pick으로 나가고, 날씨 팝업은
+// 뜨지 않는다(게임 중 팝업이 뜨면 방해된다). 게임이 꺼져 있을 때는 기존처럼 도시 도트만
+// select-city를 낸다.
+function handleDotClick(dot, event) {
+  if (props.gameActive) {
+    emit('map-pick', { col: dot.col, row: dot.row })
+    return
+  }
+  if (dot.city) handleCityDotClick(dot, event)
+}
+
+// city.mapX/mapY(0~1 상대 좌표) → 실제 그리드 칸(col,row). buildGrid가 도시 배치에 쓰는
+// 것과 완전히 같은 공식이며, koreaOffsetCol/Row는 컨테이너 크기가 바뀔 때마다 buildGrid가
+// 갱신해두므로 게임 쪽에서 별도로 계산하지 않아도 항상 화면과 일치한다.
+function mapToColRow(mapX, mapY) {
+  const localCol = Math.round(mapX * GRID_W - 0.5)
+  const localRow = Math.round(mapY * GRID_H - 0.5)
+  return { col: koreaOffsetCol + localCol, row: koreaOffsetRow + localRow }
+}
+
+defineExpose({ spawnBurst, mapToColRow })
+
 function handleCityHover(dot, event) {
   hoveredDot.value = dot
   if (!rootRef.value) return
@@ -616,7 +657,13 @@ function handleCityHover(dot, event) {
 </script>
 
 <template>
-  <div ref="rootRef" class="korea-map" @mousemove="handleMouseMove" @mouseleave="handleMouseLeave">
+  <div
+    ref="rootRef"
+    class="korea-map"
+    :class="{ 'is-game-active': gameActive }"
+    @mousemove="handleMouseMove"
+    @mouseleave="handleMouseLeave"
+  >
     <div ref="viewportRef" class="korea-map__viewport">
       <div
         ref="gridRef"
@@ -645,9 +692,9 @@ function handleCityHover(dot, event) {
                 }
               : undefined
           "
-          @mouseenter="dot.city && handleCityHover(dot, $event)"
+          @mouseenter="dot.city && !gameActive && handleCityHover(dot, $event)"
           @mouseleave="hoveredDot = null"
-          @click="dot.city && handleCityDotClick(dot, $event)"
+          @click="handleDotClick(dot, $event)"
         />
       </div>
     </div>
@@ -665,6 +712,11 @@ function handleCityHover(dot, event) {
   position: absolute;
   inset: 0;
   overflow: hidden;
+}
+
+/* "한반도 지역 찾기" 게임 진행 중에는 지도 전체가 클릭 가능한 게임판임을 커서로 알린다. */
+.korea-map.is-game-active .korea-map__dot {
+  cursor: crosshair;
 }
 
 .korea-map__viewport {
