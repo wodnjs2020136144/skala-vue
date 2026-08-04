@@ -78,25 +78,44 @@ function markerColor(condition) {
   return CONDITION_COLORS[condition] ?? CONDITION_COLORS.sun
 }
 
+// 픽셀 말풍선에 넣을 한글 라벨. city.status는 더미("맑음 (데모)")/실제 API 설명 길이가
+// 들쭉날쭉해 말풍선 폭이 튀므로 쓰지 않고, condition 코드로 고정된 짧은 라벨을 쓴다.
+const CONDITION_LABELS_KR = {
+  sun: '맑음',
+  cloud: '구름',
+  rain: '비',
+  snow: '눈',
+  thunderstorm: '뇌우',
+  fog: '안개',
+}
+
+// 기온을 파랑(추움)~빨강(더움) 색상으로 매핑해 도시 도트의 강조 링 색으로 쓴다.
+function pulseColor(city) {
+  const t = Math.min(35, Math.max(-10, city.temp))
+  const ratio = (t + 10) / 45
+  const hue = 220 - ratio * 220
+  return `hsl(${hue}, 75%, 55%)`
+}
+
 const rootRef = ref(null)
+const gridRef = ref(null)
+const viewportRef = ref(null)
 const cols = ref(0)
 const rows = ref(0)
-const cellW = ref(DOT_PX)
-const cellH = ref(DOT_PX)
 const dots = ref([])
 const hoveredDot = ref(null)
+const tooltipPos = ref({ left: 0, top: 0 })
 
-// col,row 키 -> dot 객체. 파동 계산 때마다 매번 배열을 훑지 않고 바로 찾기 위한 인덱스.
-let dotsByKey = new Map()
+// 파동 계산에서 문자열 키를 쓰지 않기 위한 평면 인덱스(= dot.index) 기반 버퍼.
+// landMask: 육지 여부(파동은 여기를 건너뛴다), frameScratch: 이번 프레임 강도.
+let landMask = new Uint8Array(0)
+let frameScratch = new Float32Array(0)
 
 function buildGrid(width, height) {
   const newCols = Math.max(1, Math.round(width / DOT_PX))
   const newRows = Math.max(1, Math.round(height / DOT_PX))
   cols.value = newCols
   rows.value = newRows
-  // grid-template이 1fr 기반이라 실제 셀 크기가 DOT_PX와 살짝 다를 수 있어, 실측값을 보관해둔다.
-  cellW.value = width / newCols
-  cellH.value = height / newRows
 
   const koreaOffsetCol = Math.floor((newCols - GRID_W) / 2)
   const koreaOffsetRow = Math.floor((newRows - GRID_H) / 2)
@@ -108,8 +127,9 @@ function buildGrid(width, height) {
     cityByKey.set(`${koreaOffsetCol + localCol},${koreaOffsetRow + localRow}`, city)
   })
 
+  const cellCount = newCols * newRows
+  const newLandMask = new Uint8Array(cellCount)
   const newDots = []
-  const newDotsByKey = new Map()
 
   for (let row = 0; row < newRows; row++) {
     for (let col = 0; col < newCols; col++) {
@@ -122,21 +142,22 @@ function buildGrid(width, height) {
         localRow < GRID_H &&
         KOREA_MATRIX[localRow][localCol] === '1'
 
-      const key = `${col},${row}`
-      const dot = {
+      const index = row * newCols + col
+      newLandMask[index] = isLand ? 1 : 0
+      newDots.push({
         col,
         row,
-        index: row * newCols + col,
+        index,
         isLand,
-        city: cityByKey.get(key) ?? null,
-      }
-      newDots.push(dot)
-      newDotsByKey.set(key, dot)
+        city: cityByKey.get(`${col},${row}`) ?? null,
+      })
     }
   }
 
   dots.value = newDots
-  dotsByKey = newDotsByKey
+  landMask = newLandMask
+  frameScratch = new Float32Array(cellCount)
+  prevTouched = []
   refreshDotElements()
 }
 
@@ -150,117 +171,261 @@ async function refreshDotElements() {
   dotElements = Array.from(rootRef.value.querySelectorAll('.korea-map__dot'))
 }
 
-let resizeObserver = null
-function handleResize(entries) {
-  const entry = entries[0]
-  if (!entry) return
-  buildGrid(entry.contentRect.width, entry.contentRect.height)
+// --- 확대/축소 · 커서 추종 팬 ---
+const MIN_SCALE = 1 // 최대 축소 = 기존 화면 그대로(가장자리 여백 없음)
+const MAX_SCALE = 2.4 // 최대 확대 = 기본 진입 배율
+const DEFAULT_SCALE = MAX_SCALE
+const ZOOM_SENSITIVITY = 0.0015
+const DRIFT_RATIO = 0.6 // 커서가 가장자리로 갈수록 팬 가용 범위의 몇 %까지 끌려가는지
+const PAN_LERP = 0.12
+
+let containerW = 0
+let containerH = 0
+let scale = DEFAULT_SCALE
+let panX = 0
+let panY = 0
+let targetPanX = 0
+let targetPanY = 0
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value))
+}
+
+// scale > 1일 때 콘텐츠가 컨테이너를 벗어나지 않는 pan 범위. scale === 1이면 [0,0]으로
+// 잠겨 기존처럼 여백 없이 꽉 차는 상태가 그대로 유지된다.
+function panRangeX() {
+  return [containerW * (1 - scale), 0]
+}
+function panRangeY() {
+  return [containerH * (1 - scale), 0]
+}
+
+function clampPan() {
+  const [minX, maxX] = panRangeX()
+  const [minY, maxY] = panRangeY()
+  panX = clamp(panX, minX, maxX)
+  panY = clamp(panY, minY, maxY)
+}
+
+function applyTransform() {
+  if (!viewportRef.value) return
+  viewportRef.value.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`
+}
+
+// 커서가 중심에서 벗어난 방향으로 지도가 살짝 끌려오도록, pan의 목표값을 커서 위치에 맞춰 갱신한다.
+function updateDriftTarget(cx, cy) {
+  if (!containerW || !containerH) return
+  const nx = clamp((cx / containerW - 0.5) * 2, -1, 1)
+  const ny = clamp((cy / containerH - 0.5) * 2, -1, 1)
+
+  const [minX, maxX] = panRangeX()
+  const centerX = (minX + maxX) / 2
+  const rangeX = (maxX - minX) / 2
+  targetPanX = centerX - nx * rangeX * DRIFT_RATIO
+
+  const [minY, maxY] = panRangeY()
+  const centerY = (minY + maxY) / 2
+  const rangeY = (maxY - minY) / 2
+  targetPanY = centerY - ny * rangeY * DRIFT_RATIO
+}
+
+function handleWheel(event) {
+  event.preventDefault()
+  if (!rootRef.value) return
+  const rect = rootRef.value.getBoundingClientRect()
+  const cx = event.clientX - rect.left
+  const cy = event.clientY - rect.top
+
+  const factor = Math.exp(-event.deltaY * ZOOM_SENSITIVITY)
+  const newScale = clamp(scale * factor, MIN_SCALE, MAX_SCALE)
+  if (newScale === scale) return
+
+  // 커서 아래 지점이 확대/축소 후에도 그 자리에 그대로 머물도록 pan을 보정한다.
+  panX = cx - (cx - panX) * (newScale / scale)
+  panY = cy - (cy - panY) * (newScale / scale)
+  scale = newScale
+  clampPan()
+  targetPanX = panX
+  targetPanY = panY
+  applyTransform()
 }
 
 // --- 커서 눌림 파동 ---
 // 커서가 지나간 자리마다 "파동"을 하나씩 등록하고, 매 프레임 그 파동이 링 모양으로
-// 퍼져나가며 감쇠하는 강도를 계산해 실제 DOM 도트에 반영한다.
+// 퍼져나가며 감쇠하는 강도를 계산해 실제 DOM 도트에 반영한다. 육지 칸은 계산에서
+// 완전히 건너뛰어 바다에서만 물결이 일렁이게 한다.
 // 성능: Vue 반응형을 거치면 도트 하나만 바뀌어도 ~수천 개 v-for 전체가 다시 diff되어
 // 렉이 심했다. 그래서 이 경로는 dotElements를 통해 style.setProperty로 직접 쓴다.
-const WAVE_SPEED = 10 // 초당 몇 칸씩 링이 퍼져나가는지
-const MAX_RADIUS = 5
+const WAVE_MAX_RADIUS = 6 // 파동이 도달할 수 있는 최대 반경(칸)
+const WAVE_TAU = 0.35 // 반경이 최대치에 가까워지는 속도(초) — 감속하며 퍼지는 느낌
 const DURATION = 900 // ms, 파동 하나의 전체 수명
-const RING_WIDTH_K = 1.2
+const RING_WIDTH_K = 1.1
+const BAND = 1.6 // 링 주변, 실제로 강도가 남는 두께(칸) — 이 폭만 스캔해 계산량을 줄인다
+const SECONDARY_OFFSET = 1.4 // 뒤따르는 2차 마루의 위상차(칸) — 파도가 다발로 보이게
+const SECONDARY_AMPLITUDE = 0.35
 const RIPPLE_MIN_INTERVAL = 50 // ms, 너무 잦은 파동 생성 방지
+const MAX_RIPPLES = 10 // 동시 파동 상한 — 프레임 비용의 천장을 고정한다
 
 const ripples = []
 let lastRippleTime = 0
 let rafId = null
 let rafRunning = false
-let touchedLastFrame = new Set()
+let prevTouched = [] // 지난 프레임에 강도가 반영된 인덱스 — 이번 프레임에 지울 후보
 
 function spawnRipple(col, row) {
   const now = performance.now()
   if (now - lastRippleTime < RIPPLE_MIN_INTERVAL) return
   lastRippleTime = now
+  if (ripples.length >= MAX_RIPPLES) ripples.shift()
   ripples.push({ col, row, startTime: now })
-  ensureTicking()
 }
 
 function ensureTicking() {
   if (rafRunning) return
   rafRunning = true
-  rafId = requestAnimationFrame(tickRipples)
+  rafId = requestAnimationFrame(tick)
 }
 
-function tickRipples() {
-  const now = performance.now()
-  const frameIntensity = new Map()
+function tick(now) {
+  let needMore = false
+
+  // 커서 추종 팬을 목표값으로 부드럽게 보간한다.
+  const dx = targetPanX - panX
+  const dy = targetPanY - panY
+  if (Math.abs(dx) > 0.05 || Math.abs(dy) > 0.05) {
+    panX += dx * PAN_LERP
+    panY += dy * PAN_LERP
+    needMore = true
+  } else {
+    panX = targetPanX
+    panY = targetPanY
+  }
+  applyTransform()
+
+  // 지난 프레임에 건드린 셀만 먼저 지운다 — 매 프레임 전체 버퍼를 훑지 않는다.
+  for (const idx of prevTouched) {
+    frameScratch[idx] = 0
+    const el = dotElements[idx]
+    if (el) el.style.removeProperty('--intensity')
+  }
+
+  const touchedThisFrame = []
 
   for (let i = ripples.length - 1; i >= 0; i--) {
     const ripple = ripples[i]
     const elapsedMs = now - ripple.startTime
-    const ringRadius = (elapsedMs / 1000) * WAVE_SPEED
-    const envelope = Math.max(0, 1 - elapsedMs / DURATION)
+    const envelopeLinear = Math.max(0, 1 - elapsedMs / DURATION)
+    const envelope = envelopeLinear * envelopeLinear // 제곱 감쇠 — 끝맺음이 부드럽다
 
-    if (ringRadius > MAX_RADIUS || envelope <= 0) {
+    if (envelope <= 0.001) {
       ripples.splice(i, 1)
       continue
     }
 
-    const minCol = Math.max(0, Math.floor(ripple.col - MAX_RADIUS))
-    const maxCol = Math.min(cols.value - 1, Math.ceil(ripple.col + MAX_RADIUS))
-    const minRow = Math.max(0, Math.floor(ripple.row - MAX_RADIUS))
-    const maxRow = Math.min(rows.value - 1, Math.ceil(ripple.row + MAX_RADIUS))
+    // 등속이 아닌 감속으로 퍼져나가 "물결이 퍼지다 잦아드는" 느낌을 준다.
+    const t = elapsedMs / 1000
+    const ringRadius = WAVE_MAX_RADIUS * (1 - Math.exp(-t / WAVE_TAU))
+
+    const reach = ringRadius + BAND
+    const minCol = Math.max(0, Math.floor(ripple.col - reach))
+    const maxCol = Math.min(cols.value - 1, Math.ceil(ripple.col + reach))
+    const minRow = Math.max(0, Math.floor(ripple.row - reach))
+    const maxRow = Math.min(rows.value - 1, Math.ceil(ripple.row + reach))
+    const bandInnerSq = Math.max(0, ringRadius - BAND) ** 2
+    const bandOuterSq = reach * reach
 
     for (let r = minRow; r <= maxRow; r++) {
+      const rowBase = r * cols.value
+      const dy2 = r - ripple.row
       for (let c = minCol; c <= maxCol; c++) {
-        const distance = Math.hypot(c - ripple.col, r - ripple.row)
-        const ring = Math.cos((distance - ringRadius) * RING_WIDTH_K)
-        const contribution = Math.max(0, ring) * envelope
+        const idx = rowBase + c
+        if (landMask[idx]) continue // 육지는 파동 계산에서 완전히 제외
+
+        const dx2 = c - ripple.col
+        const distSq = dx2 * dx2 + dy2 * dy2
+        if (distSq > bandOuterSq || distSq < bandInnerSq) continue
+
+        const distance = Math.sqrt(distSq)
+        const primary = Math.max(0, Math.cos((distance - ringRadius) * RING_WIDTH_K))
+        const secondary =
+          Math.max(0, Math.cos((distance - ringRadius + SECONDARY_OFFSET) * RING_WIDTH_K)) *
+          SECONDARY_AMPLITUDE
+        const contribution = Math.min(1, primary + secondary) * envelope
         if (contribution <= 0.02) continue
 
-        const key = `${c},${r}`
-        const prev = frameIntensity.get(key) ?? 0
-        if (contribution > prev) frameIntensity.set(key, contribution)
+        if (frameScratch[idx] === 0) touchedThisFrame.push(idx)
+        if (contribution > frameScratch[idx]) frameScratch[idx] = contribution
       }
     }
   }
 
-  frameIntensity.forEach((intensity, key) => {
-    const dot = dotsByKey.get(key)
-    const el = dot && dotElements[dot.index]
-    if (el) el.style.setProperty('--intensity', intensity)
-  })
-
-  touchedLastFrame.forEach((key) => {
-    if (!frameIntensity.has(key)) {
-      const dot = dotsByKey.get(key)
-      const el = dot && dotElements[dot.index]
-      if (el) el.style.removeProperty('--intensity')
-    }
-  })
-  touchedLastFrame = new Set(frameIntensity.keys())
-
-  if (ripples.length === 0 && touchedLastFrame.size === 0) {
-    rafRunning = false
-    return
+  for (const idx of touchedThisFrame) {
+    const el = dotElements[idx]
+    if (el) el.style.setProperty('--intensity', frameScratch[idx])
   }
-  rafId = requestAnimationFrame(tickRipples)
+  prevTouched = touchedThisFrame
+
+  if (ripples.length > 0) needMore = true
+
+  if (needMore) {
+    rafId = requestAnimationFrame(tick)
+  } else {
+    rafRunning = false
+  }
 }
 
 function handleMouseMove(event) {
-  if (!rootRef.value) return
-  const rect = rootRef.value.getBoundingClientRect()
-  const col = Math.floor((event.clientX - rect.left) / cellW.value)
-  const row = Math.floor((event.clientY - rect.top) / cellH.value)
-  spawnRipple(col, row)
+  if (!rootRef.value || !gridRef.value) return
+
+  const rootRect = rootRef.value.getBoundingClientRect()
+  updateDriftTarget(event.clientX - rootRect.left, event.clientY - rootRect.top)
+
+  // 그리드의 실제 화면 rect는 이미 transform(줌/팬)이 반영돼 있어, 별도 역변환 없이
+  // 비율만으로 칸 좌표를 구할 수 있다.
+  const gridRect = gridRef.value.getBoundingClientRect()
+  const col = Math.floor(((event.clientX - gridRect.left) / gridRect.width) * cols.value)
+  const row = Math.floor(((event.clientY - gridRect.top) / gridRect.height) * rows.value)
+
+  if (col >= 0 && col < cols.value && row >= 0 && row < rows.value) {
+    const idx = row * cols.value + col
+    if (!landMask[idx]) spawnRipple(col, row) // 육지 위 커서에서는 파동을 만들지 않는다
+  }
+
+  ensureTicking()
+}
+
+let resizeObserver = null
+function handleResize(entries) {
+  const entry = entries[0]
+  if (!entry) return
+  containerW = entry.contentRect.width
+  containerH = entry.contentRect.height
+  buildGrid(containerW, containerH)
+  clampPan()
+  applyTransform()
 }
 
 onMounted(() => {
   if (!rootRef.value) return
-  buildGrid(rootRef.value.clientWidth, rootRef.value.clientHeight)
+  containerW = rootRef.value.clientWidth
+  containerH = rootRef.value.clientHeight
+  buildGrid(containerW, containerH)
+
+  scale = DEFAULT_SCALE
+  panX = containerW * (1 - scale) / 2
+  panY = containerH * (1 - scale) / 2
+  targetPanX = panX
+  targetPanY = panY
+  applyTransform()
+
   resizeObserver = new ResizeObserver(handleResize)
   resizeObserver.observe(rootRef.value)
+  rootRef.value.addEventListener('wheel', handleWheel, { passive: false })
 })
 
 onUnmounted(() => {
   resizeObserver?.disconnect()
+  rootRef.value?.removeEventListener('wheel', handleWheel)
   if (rafId) cancelAnimationFrame(rafId)
 })
 
@@ -268,43 +433,54 @@ function handleCityDotClick(city, event) {
   emit('select-city', { city, rect: event.currentTarget.getBoundingClientRect() })
 }
 
-const tooltipStyle = () => {
-  if (!hoveredDot.value) return {}
-  return {
-    left: `${(hoveredDot.value.col + 0.5) * cellW.value}px`,
-    top: `${hoveredDot.value.row * cellH.value}px`,
+function handleCityHover(dot, event) {
+  hoveredDot.value = dot
+  if (!rootRef.value) return
+  const rootRect = rootRef.value.getBoundingClientRect()
+  const dotRect = event.currentTarget.getBoundingClientRect()
+  tooltipPos.value = {
+    left: dotRect.left - rootRect.left + dotRect.width / 2,
+    top: dotRect.top - rootRect.top,
   }
 }
 </script>
 
 <template>
   <div ref="rootRef" class="korea-map" @mousemove="handleMouseMove">
-    <div
-      class="korea-map__grid"
-      :style="{
-        gridTemplateColumns: `repeat(${cols}, 1fr)`,
-        gridTemplateRows: `repeat(${rows}, 1fr)`,
-      }"
-    >
-      <span
-        v-for="dot in dots"
-        :key="`${dot.col}-${dot.row}`"
-        class="korea-map__dot"
-        :class="{
-          'is-land': dot.isLand,
-          'is-city': dot.city,
-          'is-selected': dot.city?.id === selectedId,
+    <div ref="viewportRef" class="korea-map__viewport">
+      <div
+        ref="gridRef"
+        class="korea-map__grid"
+        :style="{
+          gridTemplateColumns: `repeat(${cols}, 1fr)`,
+          gridTemplateRows: `repeat(${rows}, 1fr)`,
         }"
-        :style="dot.city ? { background: markerColor(dot.city.condition) } : undefined"
-        @mouseenter="dot.city && (hoveredDot = dot)"
-        @mouseleave="hoveredDot = null"
-        @click="dot.city && handleCityDotClick(dot.city, $event)"
-      />
+      >
+        <span
+          v-for="dot in dots"
+          :key="`${dot.col}-${dot.row}`"
+          class="korea-map__dot"
+          :class="{
+            'is-land': dot.isLand,
+            'is-city': dot.city,
+            'is-selected': dot.city?.id === selectedId,
+            [`is-condition-${dot.city?.condition}`]: !!dot.city,
+          }"
+          :style="
+            dot.city
+              ? { background: markerColor(dot.city.condition), '--pulse-color': pulseColor(dot.city) }
+              : undefined
+          "
+          @mouseenter="dot.city && handleCityHover(dot, $event)"
+          @mouseleave="hoveredDot = null"
+          @click="dot.city && handleCityDotClick(dot.city, $event)"
+        />
+      </div>
     </div>
 
-    <span v-if="hoveredDot?.city" class="korea-map__tooltip" :style="tooltipStyle()">
-      {{ hoveredDot.city.name }}
-    </span>
+    <div v-if="hoveredDot?.city" class="korea-map__bubble" :style="{ left: `${tooltipPos.left}px`, top: `${tooltipPos.top}px` }">
+      {{ hoveredDot.city.name }} {{ CONDITION_LABELS_KR[hoveredDot.city.condition] ?? '' }}
+    </div>
   </div>
 </template>
 
@@ -315,6 +491,13 @@ const tooltipStyle = () => {
   position: absolute;
   inset: 0;
   overflow: hidden;
+}
+
+.korea-map__viewport {
+  position: absolute;
+  inset: 0;
+  transform-origin: 0 0;
+  will-change: transform;
 }
 
 .korea-map__grid {
@@ -342,6 +525,8 @@ const tooltipStyle = () => {
   position: relative;
   z-index: 1;
   cursor: pointer;
+  transform: scale(1.35);
+  box-shadow: 0 0 0 2px var(--pulse-color, var(--amber));
   transition: transform 0.15s ease;
 }
 
@@ -354,16 +539,149 @@ const tooltipStyle = () => {
   box-shadow: 0 0 0 2px var(--amber);
 }
 
-.korea-map__tooltip {
+/* 조건별 강조 링 — 도시 도트 9개뿐이라 전부 CSS 키프레임으로 처리, 매 프레임 JS 비용이 없다. */
+.korea-map__dot.is-city::after {
+  content: '';
   position: absolute;
-  transform: translate(-50%, calc(-100% - 8px));
-  color: var(--ink);
-  font-family: var(--font-mono);
+  inset: -4px;
+  border-radius: 50%;
+  border: 2px solid var(--pulse-color, var(--amber));
+  opacity: 0;
+  pointer-events: none;
+}
+
+.korea-map__dot.is-condition-sun::after {
+  animation: dot-pulse-ring 2.2s ease-out infinite;
+}
+.korea-map__dot.is-condition-cloud::after {
+  animation: dot-pulse-ring 4s ease-out infinite;
+}
+.korea-map__dot.is-condition-rain::after {
+  animation: dot-pulse-ring 1.4s ease-out infinite;
+}
+.korea-map__dot.is-condition-snow::after {
+  animation: dot-blink 2.6s ease-in-out infinite;
+}
+.korea-map__dot.is-condition-thunderstorm::after {
+  animation: dot-flicker 1.8s steps(1) infinite;
+}
+.korea-map__dot.is-condition-fog::after {
+  animation: dot-blink 4.5s ease-in-out infinite;
+  opacity: 0.25;
+}
+
+.korea-map__dot.is-condition-rain::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--pulse-color, #5b8fc7);
+  transform: translateX(-50%);
+  animation: dot-raindrop 1.1s linear infinite;
+}
+
+@keyframes dot-pulse-ring {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(1.9);
+    opacity: 0;
+  }
+}
+
+@keyframes dot-blink {
+  0%,
+  100% {
+    opacity: 0.15;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.55;
+    transform: scale(1.3);
+  }
+}
+
+@keyframes dot-flicker {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  10% {
+    opacity: 0.8;
+  }
+  15% {
+    opacity: 0.1;
+  }
+  25% {
+    opacity: 0.9;
+  }
+  30% {
+    opacity: 0;
+  }
+}
+
+@keyframes dot-raindrop {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 0);
+  }
+  20% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, 10px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .korea-map__dot.is-city::after,
+  .korea-map__dot.is-condition-rain::before {
+    animation: none !important;
+    opacity: 0 !important;
+  }
+}
+
+/* 픽셀 말풍선 — 줌 뷰포트 바깥(korea-map 직계)에 둬서 배율과 무관하게 크기가 고정된다. */
+.korea-map__bubble {
+  position: absolute;
+  transform: translate(-50%, calc(-100% - 12px));
+  background: var(--paper);
+  border: 3px solid var(--ink);
+  padding: 6px 10px 8px;
+  font-family: var(--font-pixel-kr);
   font-size: 12px;
+  color: var(--ink);
   white-space: nowrap;
   pointer-events: none;
   z-index: 10;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
-  font-weight: 500;
+  clip-path: polygon(4px 0, calc(100% - 4px) 0, 100% 4px, 100% 100%, 4px 100%, 0 calc(100% - 4px), 0 4px);
+}
+
+.korea-map__bubble::before,
+.korea-map__bubble::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.korea-map__bubble::before {
+  bottom: -9px;
+  width: 12px;
+  height: 9px;
+  background: var(--ink);
+}
+
+.korea-map__bubble::after {
+  bottom: -6px;
+  width: 6px;
+  height: 6px;
+  background: var(--paper);
 }
 </style>
