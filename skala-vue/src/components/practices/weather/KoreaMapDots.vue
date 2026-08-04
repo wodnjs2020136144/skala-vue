@@ -68,14 +68,13 @@ const KOREA_MATRIX = [
   '0000011100000000000000',
 ]
 
-// 그리드 칸 수를 고정한다("한반도 매트릭스 + 약간의 바다 여백"). 예전에는 화면 픽셀
-// 크기를 고정 도트 크기(DOT_PX)로 나눠 칸 수를 정했는데, 그러면 화면이 넓을수록(=화면을
-// 꽉 채우는 바다까지 전부 도트로 그리면) 칸 수가 수천 개까지 늘어나 성능에 부담이었다.
-// 칸 수를 상수로 고정하면 화면 크기와 무관하게 항상 같은 개수만 그리고, 실제 픽셀 크기는
-// CSS(.korea-map__stage의 aspect-ratio)가 알아서 정한다.
-const MAP_MARGIN_CELLS = 3 // 한반도 매트릭스 바깥으로 "약간의 바다"를 몇 칸 더 보여줄지
-const BASE_GRID_W = GRID_W + MAP_MARGIN_CELLS * 2
-const BASE_GRID_H = GRID_H + MAP_MARGIN_CELLS * 2
+// 도트 한 칸의 픽셀 크기 — 육지·바다 전체 그리드가 이 값 하나로 통일된다. 화면을 완전히
+// 채우기 위해 칸 수(cols/rows)는 항상 "컨테이너 픽셀 크기 / DOT_PX"로 동적 계산한다(화면
+// 일부만 도트로 그리고 나머지를 단색으로 비우면 안 된다 — 여백도 전부 바다 픽셀이어야 함).
+// 14→16으로 키운 이유: 한반도(22×41칸)는 크기가 고정이라, 도트가 커질수록 같은 칸 수가
+// 차지하는 실제 픽셀 면적이 커져 화면에서 한반도가 차지하는 비중이 자연히 커진다. 동시에
+// 같은 화면을 채우는 데 필요한 총 칸 수(=DOM 노드 수)는 줄어 성능에도 도움이 된다.
+const DOT_PX = 16
 
 // 날씨 조건별 마커 색상.
 const CONDITION_COLORS = {
@@ -161,9 +160,9 @@ let burstVariant = []
 let koreaOffsetCol = 0
 let koreaOffsetRow = 0
 
-function buildGrid() {
-  const newCols = BASE_GRID_W
-  const newRows = BASE_GRID_H
+function buildGrid(width, height) {
+  const newCols = Math.max(1, Math.round(width / DOT_PX))
+  const newRows = Math.max(1, Math.round(height / DOT_PX))
   cols.value = newCols
   rows.value = newRows
 
@@ -216,13 +215,12 @@ function buildGrid() {
 }
 
 // 데모/실제 데이터 토글 등으로 부모의 cities 배열이 통째로 교체되면 그리드를 다시 만든다.
-// (칸 수 자체는 고정이라 buildGrid()는 인자가 필요 없다. zoom/pan 상태도 건드리지 않으므로
-// 다시 그려도 화면 위치는 유지된다.)
+// (buildGrid는 zoom/pan 상태를 건드리지 않으므로 다시 그려도 화면 위치는 유지된다.)
 watch(
   () => props.cities,
   () => {
     if (!containerW || !containerH) return
-    buildGrid()
+    buildGrid(containerW, containerH)
   },
 )
 
@@ -237,9 +235,9 @@ async function refreshDotElements() {
 }
 
 // --- 확대/축소 · 커서 추종 팬 ---
-const MIN_SCALE = 1 // 최대 축소 = .korea-map__stage가 "한반도 + 약간의 바다" 비율로 화면에 꽉 찬 상태
+const MIN_SCALE = 1 // 최대 축소 = 화면을 여백 없이 도트로 꽉 채운 기본 상태
 const MAX_SCALE = 2.4 // 최대 확대
-const DEFAULT_SCALE = MIN_SCALE // 처음 진입 시 바로 "한반도 + 약간의 바다"가 보이게 시작한다
+const DEFAULT_SCALE = MIN_SCALE // 처음 진입 시 바로 이 상태로 시작한다
 const ZOOM_SENSITIVITY = 0.0015
 const DRIFT_RATIO = 0.6 // 커서가 가장자리로 갈수록 팬 가용 범위의 몇 %까지 끌려가는지
 const PAN_LERP = 0.12
@@ -252,31 +250,12 @@ let panY = 0
 let targetPanX = 0
 let targetPanY = 0
 
-// .korea-map__stage(고정 비율 BASE_GRID_W:BASE_GRID_H)의 실제 픽셀 크기. CSS의 aspect-ratio
-// 만으로는 "컨테이너 안에 최대한 크게, 비율 유지, 넘치지 않게"를 계산할 수 없었다(체인 전체에
-// 확정 픽셀값을 가진 시작점이 없어 grid가 최소 크기로 쪼그라드는 버그가 있었다) — <img>의
-// object-fit:contain과 같은 계산을 JS로 직접 해서 인라인 width/height로 박아넣는다.
-const stageSize = ref({ width: 0, height: 0 })
-function updateStageSize() {
-  if (!containerW || !containerH) return
-  const containerAspect = containerW / containerH
-  const stageAspect = BASE_GRID_W / BASE_GRID_H
-  if (containerAspect > stageAspect) {
-    // 컨테이너가 상대적으로 더 넓다 → 높이를 꽉 채우고 폭은 비율대로 계산
-    const height = containerH
-    stageSize.value = { width: height * stageAspect, height }
-  } else {
-    const width = containerW
-    stageSize.value = { width, height: width / stageAspect }
-  }
-}
-
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value))
 }
 
 // scale > 1일 때 콘텐츠가 컨테이너를 벗어나지 않는 pan 범위. scale === 1이면 [0,0]으로
-// 잠겨, .korea-map__stage가 화면 중앙에 비율대로 꽉 찬(letterbox) 상태 그대로 유지된다.
+// 잠겨 화면을 여백 없이 도트로 꽉 채운 상태 그대로 유지된다.
 function panRangeX() {
   return [containerW * (1 - scale), 0]
 }
@@ -645,9 +624,7 @@ function handleResize(entries) {
   if (!entry) return
   containerW = entry.contentRect.width
   containerH = entry.contentRect.height
-  // 칸 수는 고정이라(BASE_GRID_W/H) 리사이즈만으로는 buildGrid를 다시 부를 필요가 없다 —
-  // stage 픽셀 크기와 pan 범위(둘 다 containerW/H 기준)만 다시 계산하면 된다.
-  updateStageSize()
+  buildGrid(containerW, containerH)
   clampPan()
   applyTransform()
 }
@@ -656,8 +633,7 @@ onMounted(() => {
   if (!rootRef.value) return
   containerW = rootRef.value.clientWidth
   containerH = rootRef.value.clientHeight
-  updateStageSize()
-  buildGrid()
+  buildGrid(containerW, containerH)
 
   scale = DEFAULT_SCALE
   panX = containerW * (1 - scale) / 2
@@ -726,41 +702,36 @@ function handleCityHover(dot, event) {
   >
     <div ref="viewportRef" class="korea-map__viewport">
       <div
-        class="korea-map__stage"
-        :style="{ width: `${stageSize.width}px`, height: `${stageSize.height}px` }"
+        ref="gridRef"
+        class="korea-map__grid"
+        :style="{
+          gridTemplateColumns: `repeat(${cols}, 1fr)`,
+          gridTemplateRows: `repeat(${rows}, 1fr)`,
+        }"
       >
-        <div
-          ref="gridRef"
-          class="korea-map__grid"
-          :style="{
-            gridTemplateColumns: `repeat(${cols}, 1fr)`,
-            gridTemplateRows: `repeat(${rows}, 1fr)`,
+        <span
+          v-for="dot in dots"
+          :key="`${dot.col}-${dot.row}`"
+          class="korea-map__dot"
+          :class="{
+            'is-land': dot.isLand,
+            'is-city': dot.city && !gameActive,
+            'is-selected': dot.city?.id === selectedId && !gameActive,
+            [`is-condition-${dot.city?.condition}`]: !!dot.city && !gameActive,
           }"
-        >
-          <span
-            v-for="dot in dots"
-            :key="`${dot.col}-${dot.row}`"
-            class="korea-map__dot"
-            :class="{
-              'is-land': dot.isLand,
-              'is-city': dot.city && !gameActive,
-              'is-selected': dot.city?.id === selectedId && !gameActive,
-              [`is-condition-${dot.city?.condition}`]: !!dot.city && !gameActive,
-            }"
-            :style="
-              dot.city && !gameActive
-                ? {
-                    background: markerColor(dot.city.condition),
-                    '--pulse-color': pulseColor(dot.city),
-                    '--marker-border-color': markerBorderColor(dot.city),
-                  }
-                : undefined
-            "
-            @mouseenter="dot.city && !gameActive && handleCityHover(dot, $event)"
-            @mouseleave="hoveredDot = null"
-            @click="handleDotClick(dot, $event)"
-          />
-        </div>
+          :style="
+            dot.city && !gameActive
+              ? {
+                  background: markerColor(dot.city.condition),
+                  '--pulse-color': pulseColor(dot.city),
+                  '--marker-border-color': markerBorderColor(dot.city),
+                }
+              : undefined
+          "
+          @mouseenter="dot.city && !gameActive && handleCityHover(dot, $event)"
+          @mouseleave="hoveredDot = null"
+          @click="handleDotClick(dot, $event)"
+        />
       </div>
     </div>
 
@@ -787,21 +758,8 @@ function handleCityHover(dot, event) {
 .korea-map__viewport {
   position: absolute;
   inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   transform-origin: 0 0;
   will-change: transform;
-}
-
-/* "한반도 + 약간의 바다" 비율의 박스 — 실제 픽셀 width/height는 JS(updateStageSize)가
-   containerW/H와 BASE_GRID_W/H 비율을 비교해 계산해서 :style로 박아넣는다(CSS aspect-ratio
-   만으로는 이 체인에 확정 크기를 가진 시작점이 없어 grid가 쪼그라드는 문제가 있었다).
-   flex 중앙 정렬로 뷰포트 한가운데 배치되고, 남는 여백은 부모 .weather-map의 바다색
-   배경이 그대로 비쳐 보여, 화면을 전부 도트로 채우던 예전보다 총 도트 수가 줄어든다. */
-.korea-map__stage {
-  max-width: 100%;
-  max-height: 100%;
 }
 
 .korea-map__grid {
