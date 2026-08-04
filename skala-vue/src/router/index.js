@@ -51,6 +51,12 @@ const router = createRouter({
       component: () => import('../views/DotMatrixPreviewView.vue'),
     },
     {
+      // docs/vue-study-guide.md를 앱 안에서 바로 읽을 수 있게 렌더링하는 페이지
+      path: '/study-guide',
+      name: 'study-guide',
+      component: () => import('../views/StudyGuideView.vue'),
+    },
+    {
       // Catch-all Route: 정의되지 않은 모든 경로 처리
       path: '/:pathMatch(.*)*',
       name: 'not-found',

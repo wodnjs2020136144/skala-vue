@@ -52,6 +52,7 @@ onUnmounted(() => document.removeEventListener('click', handleOutsideClick))
       <RouterLink to="/" class="app-nav__link">날씨</RouterLink>
       <RouterLink to="/map" class="app-nav__link">지도</RouterLink>
       <RouterLink to="/practices" class="app-nav__link">실습 모음</RouterLink>
+      <RouterLink to="/study-guide" class="app-nav__link">스터디 가이드</RouterLink>
     </div>
 
     <div v-if="favoriteCities.length > 0" class="app-nav__favorites">
