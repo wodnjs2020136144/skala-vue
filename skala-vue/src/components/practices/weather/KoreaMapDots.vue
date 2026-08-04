@@ -603,6 +603,9 @@ function handleCityHover(dot, event) {
   /* 파동과 달리 밝아지는 게 아니라 어두워지고 살짝 오그라들어 "눌리는" 느낌을 낸다. */
   filter: brightness(calc(1 - var(--intensity, 0) * 0.4));
   transform: scale(calc(1 - var(--intensity, 0) * 0.12));
+  /* 배경(바다) 원색과 구분되도록, 육지색보다 약 14% 어둡게 계산한 색으로 칸 사이 간격까지
+     둘러 인접한 육지 칸끼리 하나의 영역처럼 이어붙게 한다. */
+  box-shadow: 0 0 0 2px #d1cabb;
 }
 
 .korea-map__dot.is-city {
@@ -610,6 +613,9 @@ function handleCityHover(dot, event) {
   z-index: 1;
   cursor: pointer;
   transition: transform 0.15s ease;
+  /* is-land와 동시에 걸리는 경우(도시는 대부분 육지 위)가 많아, 평상시엔 지형 도트와
+     완전히 동일하게 보이도록 육지의 영역 구분 box-shadow를 여기서 지운다. */
+  box-shadow: none;
 }
 
 /* 평상시엔 주변 지형 도트와 완전히 같은 크기 — 확대·글로우·펄스는 호버했을 때만 나타난다. */

@@ -171,8 +171,7 @@ function closePopup() {
   min-height: calc(100vh - 57px);
   margin: 0;
   padding: 0;
-  /* 도트 픽셀 뒤에 깔리는 원색 — 청록(--sea) 대신 테마의 근접-검정 톤으로 자연스럽게. */
-  background-color: var(--ink);
+  background-color: var(--sea);
   animation: sea-shimmer 6s ease-in-out infinite;
   will-change: filter;
 }
