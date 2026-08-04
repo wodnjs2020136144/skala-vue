@@ -62,31 +62,6 @@ const KOREA_MATRIX = [
   '0000011100000000000000',
 ]
 
-// 한반도 북쪽으로 이어지는 대륙 실루엣. 참고 이미지가 정밀한 해안선이라기보다
-// "이 위가 대륙"이라는 대략적인 참고에 가까워, 같은 스타일(꽉 찬 덩어리 + 우측·하단이
-// 들쭉날쭉한 해안선)을 반영해 직접 설계했다. 위쪽은 넓고 아래로 갈수록 한반도 북단
-// 폭(로컬 15~19열)에 맞춰 좁아지는 쐐기 모양이다.
-// 컨테이너 크기에 따라 한반도 위쪽 여백(koreaOffsetRow)이 넉넉하지 않을 수 있어(가로로 넓고
-// 낮은 창에서는 5~10행 정도), 대륙 높이를 그 여백 안에 항상 들어오는 수준으로 잡았다.
-// 마지막 CONTINENT_ROW_OVERLAP행은 한반도 첫 육지 행들과 같은 그리드 행에 겹쳐, 원과 원이
-// 대각선으로만 스치는 이음매(시각적으로 끊겨 보임) 없이 자연스럽게 이어지도록 한다.
-const CONTINENT_W = 32
-const CONTINENT_H = 7
-const CONTINENT_ROW_OVERLAP = 3
-const CONTINENT_MATRIX = [
-  '01111111111111111111111111111111',
-  '00000111111111111111111111111110',
-  '00000001111111111111111111111100',
-  '00000000011111111111111111111000',
-  '00000000000111111111111111100000',
-  '00000000000001111111111110000000',
-  '00000000000000011111111100000000',
-]
-// 한반도 매트릭스 기준 좌측으로 5칸 옮기고, 위로는 겹치는 행 수만큼 덜 올려서
-// 대륙의 마지막 몇 행이 한반도 첫 육지 행들과 같은 그리드 행을 공유하게 한다.
-const CONTINENT_OFFSET_FROM_KOREA_COL = -5
-const CONTINENT_OFFSET_FROM_KOREA_ROW = -(CONTINENT_H - CONTINENT_ROW_OVERLAP)
-
 // 도트 한 칸의 픽셀 크기 — 육지·바다 전체 그리드가 이 값 하나로 통일된다.
 const DOT_PX = 14
 
@@ -151,9 +126,6 @@ function buildGrid(width, height) {
 
   const koreaOffsetCol = Math.floor((newCols - GRID_W) / 2)
   const koreaOffsetRow = Math.floor((newRows - GRID_H) / 2)
-  // 대륙은 한반도를 기준으로 상대 배치해, 컨테이너 크기가 바뀌어도 항상 함께 움직인다.
-  const continentOffsetCol = koreaOffsetCol + CONTINENT_OFFSET_FROM_KOREA_COL
-  const continentOffsetRow = koreaOffsetRow + CONTINENT_OFFSET_FROM_KOREA_ROW
 
   const cityByKey = new Map()
   props.cities.forEach((city) => {
@@ -177,17 +149,7 @@ function buildGrid(width, height) {
         localRow < GRID_H &&
         KOREA_MATRIX[localRow][localCol] === '1'
 
-      const continentCol = col - continentOffsetCol
-      const continentRow = row - continentOffsetRow
-      const isContinent =
-        !isKoreaLand &&
-        continentCol >= 0 &&
-        continentCol < CONTINENT_W &&
-        continentRow >= 0 &&
-        continentRow < CONTINENT_H &&
-        CONTINENT_MATRIX[continentRow][continentCol] === '1'
-
-      const isLand = isKoreaLand || isContinent
+      const isLand = isKoreaLand
       const index = row * newCols + col
       newLandMask[index] = isLand ? 1 : 0
       newDots.push({
@@ -195,7 +157,6 @@ function buildGrid(width, height) {
         row,
         index,
         isLand,
-        isContinent,
         city: cityByKey.get(`${col},${row}`) ?? null,
       })
     }
@@ -495,7 +456,6 @@ function handleCityHover(dot, event) {
 <template>
   <div ref="rootRef" class="korea-map" @mousemove="handleMouseMove">
     <div ref="viewportRef" class="korea-map__viewport">
-      <div class="korea-map__sea-flow" />
       <div
         ref="gridRef"
         class="korea-map__grid"
@@ -510,7 +470,6 @@ function handleCityHover(dot, event) {
           class="korea-map__dot"
           :class="{
             'is-land': dot.isLand,
-            'is-continent': dot.isContinent,
             'is-city': dot.city,
             'is-selected': dot.city?.id === selectedId,
             [`is-condition-${dot.city?.condition}`]: !!dot.city,
@@ -540,12 +499,6 @@ function handleCityHover(dot, event) {
   position: absolute;
   inset: 0;
   overflow: hidden;
-  /* 픽셀 손가락 커서 — 기본은 가리키는 손, 클릭(버튼을 누르는 동안)엔 편 손으로 바뀐다. */
-  cursor: url('../../../assets/cursors/point.png') 6 2, pointer;
-}
-
-.korea-map:active {
-  cursor: url('../../../assets/cursors/grab.png') 10 8, pointer;
 }
 
 .korea-map__viewport {
@@ -553,36 +506,6 @@ function handleCityHover(dot, event) {
   inset: 0;
   transform-origin: 0 0;
   will-change: transform;
-}
-
-/* 바다 "흐름" 효과 — 도트 하나하나에 애니메이션을 걸면 수천 개를 매 프레임 리페인트해야
-   해서 무겁다. 대신 그리드 바로 아래에 큰 사선 그라데이션 레이어 하나만 깔고, 그 레이어를
-   transform(translate)만으로 흘려보낸다. transform 애니메이션은 GPU 합성으로 처리되어
-   도트 개수와 무관하게 비용이 항상 상수(엘리먼트 1개)다. 바다 도트에 준 옅은 투명도(아래
-   .korea-map__dot 참고) 덕분에 도트 사이·표면으로 이 흐름이 은은하게 비쳐 보인다.
-   커서 파동(--intensity)은 도트 자체의 밝기(filter)로 처리되는 별개 레이어라 계산이
-   전혀 늘지 않고 시각적으로만 자연스럽게 겹친다. */
-.korea-map__sea-flow {
-  position: absolute;
-  inset: -50% -50%;
-  background: repeating-linear-gradient(
-    120deg,
-    rgba(255, 255, 255, 0.14) 0px,
-    rgba(255, 255, 255, 0.14) 18px,
-    transparent 18px,
-    transparent 70px
-  );
-  animation: sea-flow-drift 14s linear infinite;
-  pointer-events: none;
-}
-
-@keyframes sea-flow-drift {
-  from {
-    transform: translate(0, 0);
-  }
-  to {
-    transform: translate(-140px, 90px);
-  }
 }
 
 .korea-map__grid {
@@ -597,20 +520,14 @@ function handleCityHover(dot, event) {
   width: 100%;
   height: 100%;
   border-radius: 50%;
-  /* 완전히 평평한 단색 도트. 파동이 지나갈 때만 밝기(filter)로 색이 밝아진다 — 그림자/그러데이션 없음.
-     살짝의 투명도(92%)로 뒤쪽 .korea-map__sea-flow 레이어가 은은하게 비친다. */
-  background: rgba(124, 192, 203, 0.92);
+  /* 완전히 평평한 단색 도트. 파동이 지나갈 때만 밝기(filter)로 색이 밝아진다 — 그림자/그러데이션 없음. */
+  background: #7cc0cb;
   filter: brightness(calc(1 + var(--intensity, 0) * 0.9));
 }
 
 .korea-map__dot.is-land {
   background: var(--dot-lit);
   filter: brightness(calc(1 + var(--intensity, 0) * 0.5));
-}
-
-/* 대륙(한반도 북쪽 연장) — 한반도 육지색보다 약 14% 어둡게 계산한 값으로 구분한다. */
-.korea-map__dot.is-continent {
-  background: #d1cabb;
 }
 
 .korea-map__dot.is-city {
