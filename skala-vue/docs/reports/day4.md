@@ -2169,6 +2169,69 @@ function handlePointerMove(event) {
 
 ---
 
+## 30. 날씨 탭 요약 정보를 통계 타일 그리드로 개편
+
+**요구사항**
+- 날씨 탭의 "오늘의 날씨" 제목 문구를 지우고, 그 아래 요약 정보(평균/최고/최저/즐겨찾기/검색 결과를 한 줄 텍스트로 나열하던 것)를 더 보기 좋게 정리한다.
+
+**사고 과정**
+- 값 자체는 이미 `averageTemp`/`hottestCity`/`coldestCity`/`favoriteCount`/`filteredCount` computed로 다 준비돼 있어서, 새 데이터나 새 컴포넌트 없이 **기존 값을 어떻게 배치하느냐**만 바꾸면 되는 작업이었다.
+- "검색 결과 N개"는 성격이 다르다는 걸 확인했다 — 평균/최고/최저/즐겨찾기는 검색과 무관하게 항상 전체 도시 기준인데, 검색 결과 개수만 검색이라는 조작에 실시간으로 반응한다. 그래서 이 값은 통계 타일에서 빼고, 검색과 직접 연결된 정렬 툴바 쪽으로 옮기는 게 자연스럽다고 판단했다.
+
+**해결 과정**
+1. `<h2>오늘의 날씨</h2>` 제목과 대응 CSS를 삭제했다.
+2. 한 줄 텍스트 요약을 4칸 통계 타일 그리드(평균/최고/최저/즐겨찾기)로 바꾸고, 검색 결과 개수는 정렬 툴바 왼쪽으로 옮겼다.
+
+#### 파일 경로: `src/views/WeatherHomeView.vue`
+```html
+<div class="weather-parent__toolbar">
+  <span class="weather-parent__result-count">검색 결과 {{ filteredCount }}개</span>
+  <label class="weather-parent__sort">...</label>
+</div>
+
+<div v-if="averageTemp !== null" class="weather-parent__summary">
+  <div class="weather-parent__tile">
+    <span class="weather-parent__tile-label">평균</span>
+    <span class="weather-parent__tile-value">{{ convertTemp(averageTemp) }}{{ configStore.unitSymbol }}</span>
+  </div>
+  <div class="weather-parent__tile">
+    <span class="weather-parent__tile-label">최고</span>
+    <span class="weather-parent__tile-value">{{ convertTemp(hottestCity?.temp) }}{{ configStore.unitSymbol }}</span>
+    <span class="weather-parent__tile-city">{{ hottestCity?.name }}</span>
+  </div>
+  <!-- 최저 / 즐겨찾기 타일도 같은 구조 -->
+</div>
+```
+```css
+.weather-parent__summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+  gap: 8px;
+  margin: 0 0 6px;
+}
+.weather-parent__tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 4px;
+  border-radius: 10px;
+  background: rgba(94, 107, 90, 0.08);
+}
+```
+
+**트러블슈팅**
+- 없음.
+
+**결과**
+- `npm run lint`(기존 무관 오류 1건 제외)·`npx vite build` 통과.
+- Chrome 확장으로 확인: "오늘의 날씨" 제목이 사라지고 평균/최고/최저/즐겨찾기 4개 타일이 카드로 표시됨. 검색어를 입력하면 카드 목록만 필터링되고 타일 값(전체 도시 기준)은 그대로 유지되며 "검색 결과 N개"만 갱신됨을 확인. ℃→℉ 전환 시 4개 타일 값이 모두 올바르게 화씨로 변환됨. 500px 폭에서도 타일 그리드가 깨지지 않고 유지됨(375px는 브라우저 확장 도구 제약으로 직접 확인하지 못했으나, `minmax(72px,1fr)` 4칸 기준 최소 필요 폭이 320px 안팎이라 문제 없을 것으로 판단). 콘솔 에러 없음.
+
+**느낀점**
+- "요약 정보를 더 이쁘게 정리해줘"처럼 모호해 보이는 요청도, 이미 있는 데이터를 어떻게 묶고 어디에 배치하느냐만 바꾸면 새 코드를 거의 안 늘리고도 체감 완성도를 크게 높일 수 있었다 — 값 하나하나가 "항상 전체 기준"인지 "지금 조작에 반응하는지" 성격을 구분해서 배치를 결정한 게 도움이 됐다.
+
+---
+
 <!--
 아래 형식을 복사해서 작업 단위마다 항목을 추가합니다.
 

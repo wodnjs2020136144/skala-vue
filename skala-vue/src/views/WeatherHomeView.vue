@@ -127,8 +127,6 @@ function handleClickDetail(city) {
 
 <template>
   <div class="weather-parent">
-    <h2 class="weather-parent__title">오늘의 날씨</h2>
-
     <BaseDashboardCard>
       <template #search>
         <SearchBar :query="searchStore.query" @update-query="searchStore.setQuery" />
@@ -142,6 +140,7 @@ function handleClickDetail(city) {
           </p>
 
           <div class="weather-parent__toolbar">
+            <span class="weather-parent__result-count">검색 결과 {{ filteredCount }}개</span>
             <label class="weather-parent__sort">
               정렬
               <select v-model="sortBy">
@@ -152,12 +151,30 @@ function handleClickDetail(city) {
             </label>
           </div>
 
-          <p v-if="averageTemp !== null" class="weather-parent__summary">
-            즐겨찾기 {{ favoriteCount }}개 · 검색 결과 {{ filteredCount }}개 · 평균 {{ convertTemp(averageTemp) }}{{ configStore.unitSymbol }}
-            · 최고 {{ hottestCity?.name }}({{ convertTemp(hottestCity?.temp) }}{{ configStore.unitSymbol }}) · 최저 {{ coldestCity?.name }}({{
-              convertTemp(coldestCity?.temp)
-            }}{{ configStore.unitSymbol }})
-            <br /><span class="weather-parent__summary-note">(평균·최고·최저는 검색과 무관하게 전체 도시 기준)</span>
+          <!-- 평균/최고/최저/즐겨찾기 — 검색과 무관하게 항상 전체 도시 기준이라 검색 결과
+               개수와는 분리해 툴바 쪽에 따로 뒀다(위 weather-parent__result-count). -->
+          <div v-if="averageTemp !== null" class="weather-parent__summary">
+            <div class="weather-parent__tile">
+              <span class="weather-parent__tile-label">평균</span>
+              <span class="weather-parent__tile-value">{{ convertTemp(averageTemp) }}{{ configStore.unitSymbol }}</span>
+            </div>
+            <div class="weather-parent__tile">
+              <span class="weather-parent__tile-label">최고</span>
+              <span class="weather-parent__tile-value">{{ convertTemp(hottestCity?.temp) }}{{ configStore.unitSymbol }}</span>
+              <span class="weather-parent__tile-city">{{ hottestCity?.name }}</span>
+            </div>
+            <div class="weather-parent__tile">
+              <span class="weather-parent__tile-label">최저</span>
+              <span class="weather-parent__tile-value">{{ convertTemp(coldestCity?.temp) }}{{ configStore.unitSymbol }}</span>
+              <span class="weather-parent__tile-city">{{ coldestCity?.name }}</span>
+            </div>
+            <div class="weather-parent__tile">
+              <span class="weather-parent__tile-label">즐겨찾기</span>
+              <span class="weather-parent__tile-value">{{ favoriteCount }}</span>
+            </div>
+          </div>
+          <p v-if="averageTemp !== null" class="weather-parent__summary-note">
+            (평균·최고·최저는 검색과 무관하게 전체 도시 기준)
           </p>
 
           <ul v-if="sortedWeatherList.length > 0" class="city-list">
@@ -172,16 +189,6 @@ function handleClickDetail(city) {
 </template>
 
 <style scoped>
-.weather-parent__title {
-  max-width: 420px;
-  margin: 0 auto 12px;
-  font-family: var(--font-mono);
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--moss);
-  letter-spacing: 0.2px;
-}
-
 .weather-parent__selected {
   margin: 0 0 12px;
   font-family: var(--font-mono);
@@ -192,8 +199,15 @@ function handleClickDetail(city) {
 
 .weather-parent__toolbar {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: space-between;
   margin-bottom: 8px;
+}
+
+.weather-parent__result-count {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--moss);
 }
 
 .weather-parent__sort {
@@ -215,15 +229,47 @@ function handleClickDetail(city) {
   color: var(--ink);
 }
 
+/* 평균/최고/최저/즐겨찾기 통계 타일 그리드. auto-fit이라 좁은 화면에서는 2×2로 접힌다. */
 .weather-parent__summary {
-  margin: 0 0 16px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+  gap: 8px;
+  margin: 0 0 6px;
+}
+
+.weather-parent__tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 4px;
+  border-radius: 10px;
+  background: rgba(94, 107, 90, 0.08);
+}
+
+.weather-parent__tile-label {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--moss);
-  line-height: 1.5;
+}
+
+.weather-parent__tile-value {
+  font-family: var(--font-pixel);
+  font-size: 18px;
+  color: var(--ink);
+}
+
+.weather-parent__tile-city {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--moss);
 }
 
 .weather-parent__summary-note {
+  margin: 0 0 16px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--moss);
   opacity: 0.75;
 }
 
