@@ -358,12 +358,9 @@ const seaTone = computed(() => {
   return 'rgb(92, 156, 168)'
 })
 
-// --- 지도 효과 토글: 레이더 스윕 · 날씨 파티클 · 두 도시 비교 ---
-// 시스템이 "동작 줄이기"를 요청한 경우 기본값을 꺼진 상태로 시작한다.
-const prefersReducedMotion =
-  typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-const radarEnabled = ref(!prefersReducedMotion)
-const particlesEnabled = ref(!prefersReducedMotion)
+// --- 지도 효과 토글: 레이더 스윕 · 두 도시 비교 ---
+// 평소엔 꺼둔 상태로 시작하고, 필요할 때만 사용자가 직접 켠다.
+const radarEnabled = ref(false)
 
 const isCompareMode = ref(false)
 function handleCompareModeChange(value) {
@@ -384,7 +381,7 @@ function toggleCompareMode() {
         <div class="weather-map__grid-area">
           <KoreaMapDots ref="mapDotsRef" :cities="cityList" :landmarks="MAP_LANDMARKS" :selected-id="selectedId"
             :game-active="game.status.value === 'playing'" :radar-enabled="radarEnabled"
-            :particles-enabled="particlesEnabled" @select-city="selectCity" @map-pick="handleMapPick"
+            @select-city="selectCity" @map-pick="handleMapPick"
             @compare-mode-change="handleCompareModeChange" />
         </div>
 
@@ -402,10 +399,6 @@ function toggleCompareMode() {
               <label class="map-window__toggle">
                 <input v-model="radarEnabled" type="checkbox" />
                 레이더 스윕
-              </label>
-              <label class="map-window__toggle">
-                <input v-model="particlesEnabled" type="checkbox" />
-                날씨 파티클
               </label>
               <button class="map-window__compare-btn" :class="{ 'is-active': isCompareMode }"
                 :disabled="game.status.value === 'playing'" @click="toggleCompareMode">

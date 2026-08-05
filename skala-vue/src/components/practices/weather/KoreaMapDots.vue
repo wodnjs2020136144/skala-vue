@@ -1,14 +1,5 @@
 <script setup>
 import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import {
-  PATTERN_GRID,
-  computeFogFrame,
-  computeRainFrame,
-  computeSnowFrame,
-  createFogLayers,
-  createRainDrops,
-  createSnowFlakes,
-} from '../../../utils/pixelWeatherFrames'
 
 const props = defineProps({
   cities: {
@@ -31,13 +22,9 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
-  // 레이더 스윕 · 날씨 파티클 오버레이 on/off. 게임 중에는 시야를 방해하지 않도록 이 값과
-  // 무관하게 항상 꺼진다(아래 tick() 참고).
+  // 레이더 스윕 오버레이 on/off. 게임 중에는 시야를 방해하지 않도록 이 값과 무관하게
+  // 항상 꺼진다(아래 tick() 참고).
   radarEnabled: {
-    type: Boolean,
-    default: true,
-  },
-  particlesEnabled: {
     type: Boolean,
     default: true,
   },
@@ -306,7 +293,7 @@ let burstVariant = []
 let koreaOffsetCol = 0
 let koreaOffsetRow = 0
 
-// --- 레이더 스윕 · 날씨 파티클 오버레이 버퍼 ---
+// --- 레이더 스윕 오버레이 버퍼 ---
 // radarScratch: 화면 중심에서 도는 스윕 선이 지나간 잔광 강도(프레임마다 감쇠). 파동/프레스와
 // 달리 "지난 프레임에 닿은 칸만 지운다"가 아니라 값 자체가 서서히 0으로 줄어드는 방식이라
 // 별도 버퍼로 관리한다.
@@ -315,18 +302,6 @@ let radarInActive = new Uint8Array(0) // idx가 이미 radarActive 목록에 있
 let radarActive = []
 let sweepAngle = 0
 let lastSweepTime = null
-
-// particleScratch: 비/눈/안개 조건인 도시 주변에 흩뿌리는 작은 파티클(빗방울/눈송이/안개층).
-// DotMatrixIcon.vue와 같은 계산(computeRainFrame 등)을 재사용하되, 좌표를 도시 칸 주변
-// 반경 4~5칸으로 압축해서 쓴다.
-let particleScratch = new Float32Array(0)
-let particleColor = []
-let prevParticleTouched = []
-let cityParticles = [] // [{ col, row, index, condition, drops|flakes|layers }]
-let particleFrame = 0
-let lastParticleUpdate = 0
-const PARTICLE_CONDITIONS = new Set(['rain', 'snow', 'fog'])
-const PARTICLE_HALO_SCALE = PATTERN_GRID / 8 // 36유닛 패턴을 지도 위 지름 8칸(반경 4칸)으로 압축
 
 // 리사이즈·데이터 재로드로 buildGrid가 다시 불릴 때, dotElements(DOM 노드)는 key가 같은
 // 칸이면 그대로 재사용된다. 그런데 아래서 radarScratch 등 버퍼를 통째로 새로 만들어버리면
@@ -416,26 +391,6 @@ function buildGrid(width, height) {
   radarScratch = new Float32Array(cellCount)
   radarInActive = new Uint8Array(cellCount)
   radarActive = []
-
-  particleScratch = new Float32Array(cellCount)
-  particleColor = Array.from({ length: cellCount }, () => null)
-  prevParticleTouched = []
-  // 비/눈/안개 조건인 도시마다 독립된 입자 세트를 새로 만든다 — DotMatrixIcon 여러 개가
-  // 서로 다른 타이밍으로 움직이는 것과 같은 이유로, 도시마다 다른 패턴을 갖게 한다.
-  cityParticles = newDots
-    .filter((dot) => dot.city && PARTICLE_CONDITIONS.has(dot.city.condition))
-    .map((dot) => {
-      const condition = dot.city.condition
-      return {
-        col: dot.col,
-        row: dot.row,
-        index: dot.index,
-        condition,
-        drops: condition === 'rain' ? createRainDrops(3) : null,
-        flakes: condition === 'snow' ? createSnowFlakes() : null,
-        layers: condition === 'fog' ? createFogLayers() : null,
-      }
-    })
 
   refreshDotElements()
 }
@@ -873,55 +828,6 @@ function tick(now) {
     }
   }
 
-  // --- 날씨 파티클 오버레이: 비/눈/안개인 도시 주변에 DotMatrixIcon과 같은 계산으로 작은
-  // 파티클을 흩뿌린다. DotMatrixIcon도 80ms 간격으로 갱신하므로 같은 주기를 맞춰, 매
-  // rAF 프레임(약 16ms)마다 무거운 안개 계산이 도는 것을 막는다. ---
-  if (props.particlesEnabled && !props.gameActive && cityParticles.length > 0 && now - lastParticleUpdate >= 80) {
-    lastParticleUpdate = now
-    particleFrame += 1
-
-    for (const idx of prevParticleTouched) {
-      particleScratch[idx] = 0
-      const el = dotElements[idx]
-      if (el) {
-        el.style.removeProperty('--particle')
-        el.style.removeProperty('--particle-color')
-      }
-    }
-
-    const particleTouched = []
-    for (const cp of cityParticles) {
-      const apply = (px, py, opacity, color) => {
-        const offsetCol = Math.round((px - PATTERN_GRID / 2) / PARTICLE_HALO_SCALE)
-        const offsetRow = Math.round((py - PATTERN_GRID / 2) / PARTICLE_HALO_SCALE)
-        const col = cp.col + offsetCol
-        const row = cp.row + offsetRow
-        if (col < 0 || col >= cols.value || row < 0 || row >= rows.value) return
-        const idx = row * cols.value + col
-        if (idx === cp.index) return // 도시 마커 칸 자체는 건너뛴다(마커 색과 겹치지 않게)
-        if (particleScratch[idx] === 0) particleTouched.push(idx)
-        if (opacity > particleScratch[idx]) {
-          particleScratch[idx] = opacity
-          particleColor[idx] = color
-        }
-      }
-      if (cp.condition === 'rain') computeRainFrame(particleFrame, apply, cp.drops)
-      else if (cp.condition === 'snow') computeSnowFrame(particleFrame, apply, cp.flakes)
-      else if (cp.condition === 'fog') computeFogFrame(particleFrame, apply, cp.layers)
-    }
-
-    for (const idx of particleTouched) {
-      const el = dotElements[idx]
-      if (!el) continue
-      el.style.setProperty('--particle', particleScratch[idx])
-      el.style.setProperty('--particle-color', particleColor[idx])
-    }
-    prevParticleTouched = particleTouched
-    needMore = true
-  } else if (props.particlesEnabled && cityParticles.length > 0) {
-    needMore = true
-  }
-
   if (ripples.length > 0 || presses.length > 0 || bursts.length > 0) needMore = true
 
   if (needMore) {
@@ -1093,9 +999,9 @@ onMounted(() => {
   window.addEventListener('pointercancel', endPointer)
   window.addEventListener('keydown', handleKeydown)
 
-  // 레이더/파티클은 사용자 조작과 무관하게 계속 돌아야 하므로, 마운트 시 한 번 rAF 루프를
+  // 레이더는 사용자 조작과 무관하게 계속 돌아야 하므로, 마운트 시 한 번 rAF 루프를
   // 깨워둔다(이후엔 tick() 안에서 needMore로 스스로 계속 돈다).
-  if (props.radarEnabled || props.particlesEnabled) ensureTicking()
+  if (props.radarEnabled) ensureTicking()
 })
 
 // 토글이 꺼지면 tick()의 needMore가 결국 false가 되어 루프가 멈춘다 — 다시 켜졌을 때
@@ -1418,19 +1324,15 @@ function handleDotHover(dot, event) {
      크림 화이트(--dot-lit)와 섞여, 물결이 반짝이는 "윤슬"처럼 보이게 한다. burst(선택
      이펙트)는 한 겹 더 --burst-color(기본값 크림 화이트, 오답이면 빨간색)로 섞는다. */
   background: #7cc0cb; /* color-mix 미지원 환경 폴백 */
-  /* 가장 바깥 두 겹(파티클·레이더)이 날씨 파티클/레이더 스윕 오버레이, 안쪽 두 겹은 기존
-     파동(--intensity)·선택 폭발(--burst) 로직 그대로다. */
+  /* 가장 바깥 겹이 레이더 스윕 오버레이, 안쪽 두 겹은 기존 파동(--intensity)·선택 폭발
+     (--burst) 로직 그대로다. */
   background-color: color-mix(
     in srgb,
-    var(--particle-color, var(--dot-lit)) calc(var(--particle, 0) * 70%),
+    #fff2b8 calc(var(--radar, 0) * 45%),
     color-mix(
       in srgb,
-      #fff2b8 calc(var(--radar, 0) * 45%),
-      color-mix(
-        in srgb,
-        var(--burst-color, var(--dot-lit)) calc(var(--burst, 0) * 100%),
-        color-mix(in srgb, var(--dot-lit) calc(var(--intensity, 0) * 100%), #7cc0cb)
-      )
+      var(--burst-color, var(--dot-lit)) calc(var(--burst, 0) * 100%),
+      color-mix(in srgb, var(--dot-lit) calc(var(--intensity, 0) * 100%), #7cc0cb)
     )
   );
   transform: scale(calc(1 + var(--burst, 0) * 0.8));
@@ -1445,12 +1347,8 @@ function handleDotHover(dot, event) {
   /* 평소엔 그대로 육지색, burst가 있으면 --burst-color(기본 크림 화이트, 오답이면 빨간색)로 섞인다. */
   background-color: color-mix(
     in srgb,
-    var(--particle-color, var(--dot-lit)) calc(var(--particle, 0) * 70%),
-    color-mix(
-      in srgb,
-      #fff2b8 calc(var(--radar, 0) * 45%),
-      color-mix(in srgb, var(--burst-color, var(--dot-lit)) calc(var(--burst, 0) * 100%), var(--dot-lit))
-    )
+    #fff2b8 calc(var(--radar, 0) * 45%),
+    color-mix(in srgb, var(--burst-color, var(--dot-lit)) calc(var(--burst, 0) * 100%), var(--dot-lit))
   );
   /* 프레스는 어두워지고 오그라들고, burst(선택 이펙트)는 반대로 밝아지며 부풀어 오른다 —
      둘 다 같은 도트에서 동시에 일어날 수 있어 한 식에서 합성한다. */
