@@ -21,7 +21,9 @@ const demoStore = useDemoStore()
 const weatherList = ref([])
 const selectedCityInfo = ref(null)
 // 정렬 기준: 강사 힌트("정렬 기준이 바뀔 때만 재계산되는 computed", "v-model로 선택 UI") 반영.
-const sortBy = ref('name') // 'name' | 'temp'
+// 기본값은 권역순 — 수도권→강원→충청→호남→영남→제주 순으로 지리적으로 묶여 보이는 편이
+// 이름순보다 지도를 떠올리기 쉽다.
+const sortBy = ref('region') // 'name' | 'temp' | 'region'
 
 const isLoading = ref(true)
 const loadError = ref('')
