@@ -2232,6 +2232,111 @@ function handlePointerMove(event) {
 
 ---
 
+## 31. 지도 탭 인터랙티브 기능 4종 추가 (레이더 스윕·날씨 파티클·시간대 슬라이더·두 도시 비교)
+
+**요구사항**
+- 픽셀 컨셉을 유지하면서 지도 탭에 더 다양한 인터랙티브 기능을 추가한다.
+
+**사고 과정**
+- 기존에도 `KoreaMapDots.vue`에는 파동/프레스/버스트를 처리하는 단일 rAF `tick()` 루프와, Vue 반응형을 거치지 않고 `dotElements`에 `style.setProperty`로 직접 쓰는 최적화 패턴이 이미 있었다 — 새 기능도 여기 "얹는" 방식으로 설계하면 새 애니메이션 루프를 또 만들 필요가 없다고 판단했다.
+- 날씨 파티클은 `DotMatrixIcon.vue`의 비/눈/안개 계산(`computeRainFrame` 등, 지난 라운드에서 이미 콜백 형태로 분리해둔 로직)을 그대로 재사용하고 싶었는데, `<script setup>` 안의 함수는 다른 컴포넌트에서 import할 수 없다는 걸 확인해서, 계산 로직 자체를 `src/utils/pixelWeatherFrames.js`라는 순수 JS 모듈로 뽑아내는 리팩터링을 먼저 했다.
+- 레이더 스윕을 매 프레임 전체 그리드(수백~수천 칸)를 스캔해서 그리면 이 코드베이스가 계속 피해온 "매 프레임 전체 스캔" 안티패턴이 되므로, 반지름 방향으로 점만 샘플링하는 방식으로 비용을 O(반지름)로 낮췄다.
+- 안개 계산(`computeFogFrame`)은 원래 36×36 아이콘 하나에 80ms 간격으로만 도는 무거운 연산이라, 지도의 rAF(약 16ms) 루프에서 그대로 돌리면 여러 도시에 대해 매 프레임 도는 셈이라 부담이 컸다. DotMatrixIcon과 같은 80ms 주기로 스로틀해서 비용을 맞췄다.
+
+**해결 과정**
+1. 비/눈/안개 계산 로직을 `DotMatrixIcon.vue`에서 공용 모듈로 분리했다(입자 배열은 인스턴스마다 새로 만들도록 팩토리 함수로).
+
+#### 파일 경로: `src/utils/pixelWeatherFrames.js` (신규)
+```js
+export const PATTERN_GRID = 36
+export function createRainDrops(count = 9) { ... }
+export function computeRainFrame(frame, apply, drops) { ... }
+// createSnowFlakes/computeSnowFrame, createFogLayers/computeFogFrame도 동일 패턴
+```
+`DotMatrixIcon.vue`는 이 모듈을 import해서 자기 몫의 `RAIN_DROPS = createRainDrops()` 등을 만들고 `computeRainFrame(frame, apply, RAIN_DROPS)`로 호출하도록 바꿨다.
+
+2. `KoreaMapDots.vue`에 레이더 스윕을 추가했다 — 전체 그리드 스캔 없이 반지름 방향 점 샘플링으로 잔광을 남기고 프레임마다 감쇠시킨다.
+
+#### 파일 경로: `src/components/practices/weather/KoreaMapDots.vue`
+```js
+if (props.radarEnabled && !props.gameActive && cols.value > 0 && rows.value > 0) {
+  sweepAngle = (sweepAngle + (dtSweep / RADAR_PERIOD_MS) * 360) % 360
+  const rad = (sweepAngle * Math.PI) / 180
+  for (let r = 0; r <= maxR; r += RADAR_STEP) {
+    const col = Math.round(cx + Math.cos(rad) * r)
+    const row = Math.round(cy + Math.sin(rad) * r)
+    ...
+    radarScratch[idx] = 1
+    if (!wasActive && dots.value[idx]?.city) spawnBurst(col, row, 'correct')
+  }
+}
+// 매 프레임 감쇠
+for (const idx of radarActive) { radarScratch[idx] *= RADAR_DECAY; ... }
+```
+
+3. 날씨 파티클 오버레이 — 비/눈/안개 조건인 도시마다 `computeRainFrame` 등을 재사용하되, 36유닛 좌표를 도시 주변 반경 4칸으로 압축해서 적용한다.
+
+```js
+const PARTICLE_HALO_SCALE = PATTERN_GRID / 8
+...
+const apply = (px, py, opacity, color) => {
+  const offsetCol = Math.round((px - PATTERN_GRID / 2) / PARTICLE_HALO_SCALE)
+  const offsetRow = Math.round((py - PATTERN_GRID / 2) / PARTICLE_HALO_SCALE)
+  const col = cp.col + offsetCol
+  const row = cp.row + offsetRow
+  ...
+}
+if (cp.condition === 'rain') computeRainFrame(particleFrame, apply, cp.drops)
+```
+
+4. 두 도시 비교 경로 — 비교 모드 토글, Bresenham 알고리즘으로 두 도시 사이 직선 경로를 구해 점등하고, 중간 지점에 온도차/습도차/칸거리 말풍선을 띄운다.
+
+```js
+function bresenhamLine(x0, y0, x1, y1) { /* 표준 Bresenham */ }
+function drawComparePath(a, b) {
+  const cells = bresenhamLine(a.col, a.row, b.col, b.row)
+  comparePathIndices = cells.map((cell, i) => {
+    ...
+    el.style.setProperty('--compare-delay', `${i * 0.05}s`) // 출발→도착 순서로 반짝이게
+  })
+  comparePopup.value = { tempDiff: Math.abs(a.city.temp - b.city.temp), ... }
+}
+```
+
+5. 시간대 슬라이더 — `WeatherMapView.vue`에 0~24시 슬라이더를 추가하고, 기존 `isNight` 판정과 바다색을 슬라이더 값(또는 슬라이더를 안 만졌으면 실제 현재 시각) 기준으로 계산하게 확장했다.
+
+#### 파일 경로: `src/views/WeatherMapView.vue`
+```js
+const sliderHour = computed({
+  get: () => effectiveHour.value,
+  set: (value) => { timeOverrideHour.value = value },
+})
+const seaTone = computed(() => {
+  // SEA_TONE_STOPS(자정→새벽→한낮 --sea 색→노을→다시 밤) 사이를 선형 보간
+})
+```
+```css
+.weather-map {
+  background-color: var(--sea-tone, var(--sea));
+}
+```
+
+**트러블슈팅**
+- 문제: `DotMatrixIcon.vue`의 `RAIN_DROPS`/`SNOW_FLAKES`/`FOG_LAYERS`가 `<script setup>` 최상단에서 `Math.random()`으로 만들어지는데, 이게 모듈 전역이 아니라 컴포넌트 인스턴스마다(= `setup()` 실행마다) 새로 만들어진다는 걸 놓칠 뻔했다 — 그냥 값만 다른 파일로 옮기면 모든 아이콘이 같은 패턴을 공유하게 돼, 화면에 여러 개 떠 있을 때(홈 카드 목록 등) 전부 똑같이 움직이는 부자연스러운 결과가 나올 뻔했다.
+- 해결: 상수 배열을 내보내는 대신 `createRainDrops()` 같은 팩토리 함수로 내보내, 호출하는 쪽(아이콘 인스턴스마다, 지도의 도시마다)이 각자 새로운 랜덤 패턴을 받도록 했다.
+- 문제: 안개 파티클을 지도의 rAF 루프(매 프레임)에서 그대로 돌리면, 원래 80ms(아이콘 기준)에 한 번 도는 무거운 연산(36×36 격자 전체를 훑는 `computeFogFrame`)이 여러 도시에 대해 초당 60번씩 돌게 될 뻔했다.
+- 해결: `now - lastParticleUpdate >= 80`으로 별도 스로틀을 걸어, 파티클 계산 자체는 원래 아이콘과 같은 80ms 주기를 유지하면서 레이더·파동 등 나머지는 그대로 매 프레임 부드럽게 돌게 분리했다.
+
+**결과**
+- `npm run lint`(기존 무관 오류 1건 제외)·`npx vite build` 통과.
+- Chrome 확장으로 확인: 레이더 스윕이 실제로 회전하는지 시간차 스크린샷으로 확인, 비/눈/안개 도시 주변 파티클 색조 변화 확인, 레이더/파티클 체크박스로 즉시 켜짐/꺼짐 확인, 시간대 슬라이더로 바다색이 어두워졌다가 "현재 시각으로" 버튼으로 복원되는 것 확인, 두 도시 비교로 실제 두 도시(춘천↔인천)를 골라 경로 점등과 "온도차 0° · 습도차 0%p · 5칸" 말풍선 확인. 회귀 확인: 도시 클릭 팝업, 지도 드래그 파동/프레스, 게임 진행(정답 처리) 모두 정상, 게임 시작 시 "두 도시 비교" 버튼이 비활성화되는 것도 확인. 콘솔 에러 없음.
+
+**느낀점**
+- "재사용"이라는 말이 쉬워 보여도, Vue SFC의 `<script setup>`은 다른 파일에서 그 안의 함수를 그냥 import할 수 없다는 제약이 있어서, 진짜로 재사용하려면 로직을 순수 JS 모듈로 한 번 더 분리하는 리팩터링이 선행돼야 한다는 걸 체감했다. 이번엔 그 분리 덕분에 아이콘과 지도 양쪽에서 완전히 같은 계산을 쓰면서도 코드 중복은 없앨 수 있었다.
+- "매 프레임 전체 그리드 스캔은 피한다"는 이 코드베이스의 기존 원칙을 새 기능에도 똑같이 적용해보니, 레이더 스윕처럼 언뜻 "전체 화면을 훑어야 할 것 같은" 효과도 "지금 정말 필요한 부분만" 계산하는 방식으로 거의 항상 다시 설계할 수 있다는 걸 다시 확인했다.
+
+---
+
 <!--
 아래 형식을 복사해서 작업 단위마다 항목을 추가합니다.
 

@@ -1,5 +1,14 @@
 <script setup>
 import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import {
+  PATTERN_GRID,
+  computeFogFrame,
+  computeRainFrame,
+  computeSnowFrame,
+  createFogLayers,
+  createRainDrops,
+  createSnowFlakes,
+} from '../../../utils/pixelWeatherFrames'
 
 const props = defineProps({
   cities: {
@@ -22,9 +31,19 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  // 레이더 스윕 · 날씨 파티클 오버레이 on/off. 게임 중에는 시야를 방해하지 않도록 이 값과
+  // 무관하게 항상 꺼진다(아래 tick() 참고).
+  radarEnabled: {
+    type: Boolean,
+    default: true,
+  },
+  particlesEnabled: {
+    type: Boolean,
+    default: true,
+  },
 })
 
-const emit = defineEmits(['select-city', 'map-pick'])
+const emit = defineEmits(['select-city', 'map-pick', 'compare-mode-change'])
 
 // 참고 이미지(한반도 도트 아트)를 픽셀 단위로 분석해 그대로 옮긴 매트릭스.
 // 22x41 배열이며, 1이 육지다. 울릉도/독도/제주 등도 포함돼 있다.
@@ -154,10 +173,123 @@ const hoveredDot = ref(null)
 watch(
   () => props.gameActive,
   (active) => {
-    if (active) hoveredDot.value = null
+    if (active) {
+      hoveredDot.value = null
+      // 게임이 시작되면 비교 모드도 함께 꺼서, 게임 중 클릭이 비교 선택으로 새지 않게 한다.
+      if (compareMode.value) {
+        compareMode.value = false
+        resetCompare()
+        emit('compare-mode-change', false)
+      }
+    }
   },
 )
 const tooltipPos = ref({ left: 0, top: 0 })
+
+// --- 두 도시 비교 경로 ---
+// 켜져 있으면 도시 도트 클릭이 팝업을 여는 대신 "출발/도착"을 고르는 데 쓰인다.
+const compareMode = ref(false)
+const compareCities = ref([]) // 최대 2개: { city, col, row, index }
+const comparePopup = ref(null) // { left, top, tempDiff, humidityDiff, cellDistance, cityAName, cityBName }
+let comparePathIndices = []
+
+function clearComparePath() {
+  for (const idx of comparePathIndices) {
+    const el = dotElements[idx]
+    if (el) {
+      el.classList.remove('is-compare-path')
+      el.style.removeProperty('--compare-delay')
+    }
+  }
+  comparePathIndices = []
+  comparePopup.value = null
+}
+
+function resetCompare() {
+  compareCities.value = []
+  clearComparePath()
+}
+
+function toggleCompareMode() {
+  if (props.gameActive) return // 게임 중엔 비교 모드로 들어갈 수 없다.
+  compareMode.value = !compareMode.value
+  resetCompare()
+  emit('compare-mode-change', compareMode.value)
+}
+
+// 두 칸 사이를 잇는 직선 위의 칸들 — Bresenham 알고리즘.
+function bresenhamLine(x0, y0, x1, y1) {
+  const points = []
+  const dx = Math.abs(x1 - x0)
+  const dy = -Math.abs(y1 - y0)
+  const sx = x0 < x1 ? 1 : -1
+  const sy = y0 < y1 ? 1 : -1
+  let err = dx + dy
+  let x = x0
+  let y = y0
+  while (true) {
+    points.push({ col: x, row: y })
+    if (x === x1 && y === y1) break
+    const e2 = 2 * err
+    if (e2 >= dy) {
+      err += dy
+      x += sx
+    }
+    if (e2 <= dx) {
+      err += dx
+      y += sy
+    }
+  }
+  return points
+}
+
+function drawComparePath(a, b) {
+  clearComparePath()
+  const cells = bresenhamLine(a.col, a.row, b.col, b.row)
+  comparePathIndices = cells.map((cell, i) => {
+    const idx = cell.row * cols.value + cell.col
+    const el = dotElements[idx]
+    if (el) {
+      el.classList.add('is-compare-path')
+      // 출발에서 도착 방향으로 순서대로 점등되는 것처럼 보이도록 칸마다 지연을 준다.
+      el.style.setProperty('--compare-delay', `${i * 0.05}s`)
+    }
+    return idx
+  })
+
+  const midCell = cells[Math.floor(cells.length / 2)]
+  const midEl = dotElements[midCell.row * cols.value + midCell.col]
+  if (midEl && rootRef.value) {
+    const rootRect = rootRef.value.getBoundingClientRect()
+    const midRect = midEl.getBoundingClientRect()
+    comparePopup.value = {
+      left: midRect.left - rootRect.left + midRect.width / 2,
+      top: midRect.top - rootRect.top,
+      tempDiff: Math.abs(a.city.temp - b.city.temp),
+      humidityDiff: Math.abs(a.city.humidity - b.city.humidity),
+      cellDistance: Math.round(Math.hypot(b.col - a.col, b.row - a.row)),
+      cityAName: a.city.name,
+      cityBName: b.city.name,
+    }
+  }
+}
+
+function handleCompareClick(dot) {
+  const list = compareCities.value
+  if (list.length >= 2) {
+    resetCompare()
+    return
+  }
+  if (list.some((c) => c.city.id === dot.city.id)) return // 같은 도시 중복 선택 방지
+  const entry = { city: dot.city, col: dot.col, row: dot.row, index: dot.index }
+  const next = [...list, entry]
+  compareCities.value = next
+  if (next.length === 2) drawComparePath(next[0], next[1])
+}
+
+function handleKeydown(event) {
+  if (event.key === 'Escape' && compareMode.value) resetCompare()
+}
 
 // 파동 계산에서 문자열 키를 쓰지 않기 위한 평면 인덱스(= dot.index) 기반 버퍼.
 // landMask: 육지 여부(파동은 여기를 건너뛴다), frameScratch: 이번 프레임 강도.
@@ -174,7 +306,30 @@ let burstVariant = []
 let koreaOffsetCol = 0
 let koreaOffsetRow = 0
 
+// --- 레이더 스윕 · 날씨 파티클 오버레이 버퍼 ---
+// radarScratch: 화면 중심에서 도는 스윕 선이 지나간 잔광 강도(프레임마다 감쇠). 파동/프레스와
+// 달리 "지난 프레임에 닿은 칸만 지운다"가 아니라 값 자체가 서서히 0으로 줄어드는 방식이라
+// 별도 버퍼로 관리한다.
+let radarScratch = new Float32Array(0)
+let radarInActive = new Uint8Array(0) // idx가 이미 radarActive 목록에 있는지
+let radarActive = []
+let sweepAngle = 0
+let lastSweepTime = null
+
+// particleScratch: 비/눈/안개 조건인 도시 주변에 흩뿌리는 작은 파티클(빗방울/눈송이/안개층).
+// DotMatrixIcon.vue와 같은 계산(computeRainFrame 등)을 재사용하되, 좌표를 도시 칸 주변
+// 반경 4~5칸으로 압축해서 쓴다.
+let particleScratch = new Float32Array(0)
+let particleColor = []
+let prevParticleTouched = []
+let cityParticles = [] // [{ col, row, index, condition, drops|flakes|layers }]
+let particleFrame = 0
+let lastParticleUpdate = 0
+const PARTICLE_CONDITIONS = new Set(['rain', 'snow', 'fog'])
+const PARTICLE_HALO_SCALE = PATTERN_GRID / 8 // 36유닛 패턴을 지도 위 지름 8칸(반경 4칸)으로 압축
+
 function buildGrid(width, height) {
+  resetCompare() // 그리드가 다시 만들어지면 기존 비교 경로가 가리키던 DOM 인덱스가 무효해진다.
   const dotPx = computeDotPx(height)
   const newCols = Math.max(1, Math.round(width / dotPx))
   const newRows = Math.max(1, Math.round(height / dotPx))
@@ -239,6 +394,31 @@ function buildGrid(width, height) {
   burstVariant = Array.from({ length: cellCount }, () => null)
   prevTouched = []
   prevBurstTouched = []
+
+  radarScratch = new Float32Array(cellCount)
+  radarInActive = new Uint8Array(cellCount)
+  radarActive = []
+
+  particleScratch = new Float32Array(cellCount)
+  particleColor = Array.from({ length: cellCount }, () => null)
+  prevParticleTouched = []
+  // 비/눈/안개 조건인 도시마다 독립된 입자 세트를 새로 만든다 — DotMatrixIcon 여러 개가
+  // 서로 다른 타이밍으로 움직이는 것과 같은 이유로, 도시마다 다른 패턴을 갖게 한다.
+  cityParticles = newDots
+    .filter((dot) => dot.city && PARTICLE_CONDITIONS.has(dot.city.condition))
+    .map((dot) => {
+      const condition = dot.city.condition
+      return {
+        col: dot.col,
+        row: dot.row,
+        index: dot.index,
+        condition,
+        drops: condition === 'rain' ? createRainDrops(3) : null,
+        flakes: condition === 'snow' ? createSnowFlakes() : null,
+        layers: condition === 'fog' ? createFogLayers() : null,
+      }
+    })
+
   refreshDotElements()
 }
 
@@ -388,6 +568,12 @@ const BURST_MAX_RADIUS = 5.5 // 칸
 const BURST_DURATION = 480 // ms
 const BURST_BAND = 1.4 // 링 주변 실제로 강도가 남는 두께(칸)
 const MAX_BURSTS = 6
+
+// 레이더 스윕 — 화면 중심에서 한 바퀴 도는 데 걸리는 시간, 반지름 방향 샘플링 간격,
+// 프레임마다 잔광이 줄어드는 비율(1에 가까울수록 오래 남는다).
+const RADAR_PERIOD_MS = 4000
+const RADAR_STEP = 0.7
+const RADAR_DECAY = 0.92
 
 const ripples = []
 const presses = []
@@ -620,6 +806,104 @@ function tick(now) {
   }
   prevBurstTouched = burstTouchedThisFrame
 
+  // --- 레이더 스윕: 화면 중심에서 도는 선이 지나가며 잔광을 남기고 서서히 사그라든다.
+  // 게임 중에는 시야를 방해하지 않도록 끈다. 매 프레임 회전각만 갱신하고, 실제로 닿는
+  // 칸은 반지름 방향으로 점을 찍듯 샘플링해(전체 그리드 스캔 없이) 비용을 억제한다. ---
+  if (props.radarEnabled && !props.gameActive && cols.value > 0 && rows.value > 0) {
+    const dtSweep = lastSweepTime == null ? 0 : now - lastSweepTime
+    lastSweepTime = now
+    sweepAngle = (sweepAngle + (dtSweep / RADAR_PERIOD_MS) * 360) % 360
+    const rad = (sweepAngle * Math.PI) / 180
+    const cx = cols.value / 2
+    const cy = rows.value / 2
+    const maxR = Math.max(cols.value, rows.value)
+    const cosA = Math.cos(rad)
+    const sinA = Math.sin(rad)
+    for (let r = 0; r <= maxR; r += RADAR_STEP) {
+      const col = Math.round(cx + cosA * r)
+      const row = Math.round(cy + sinA * r)
+      if (col < 0 || col >= cols.value || row < 0 || row >= rows.value) continue
+      const idx = row * cols.value + col
+      const wasActive = radarInActive[idx] === 1
+      radarScratch[idx] = 1
+      if (!wasActive) {
+        radarInActive[idx] = 1
+        radarActive.push(idx)
+      }
+      // 스윕이 도시 마커를 새로 지나는 순간에만 짧게 반짝인다(같은 칸에 계속 머무는 동안
+      // 매 프레임 다시 터뜨리지 않도록 wasActive로 막는다).
+      if (!wasActive && dots.value[idx]?.city) spawnBurst(col, row, 'correct')
+    }
+    needMore = true
+  } else {
+    lastSweepTime = null
+  }
+
+  for (let i = radarActive.length - 1; i >= 0; i--) {
+    const idx = radarActive[i]
+    radarScratch[idx] *= RADAR_DECAY
+    const el = dotElements[idx]
+    if (radarScratch[idx] < 0.02) {
+      radarScratch[idx] = 0
+      radarInActive[idx] = 0
+      if (el) el.style.removeProperty('--radar')
+      radarActive[i] = radarActive[radarActive.length - 1]
+      radarActive.pop()
+    } else {
+      if (el) el.style.setProperty('--radar', radarScratch[idx].toFixed(3))
+      needMore = true
+    }
+  }
+
+  // --- 날씨 파티클 오버레이: 비/눈/안개인 도시 주변에 DotMatrixIcon과 같은 계산으로 작은
+  // 파티클을 흩뿌린다. DotMatrixIcon도 80ms 간격으로 갱신하므로 같은 주기를 맞춰, 매
+  // rAF 프레임(약 16ms)마다 무거운 안개 계산이 도는 것을 막는다. ---
+  if (props.particlesEnabled && !props.gameActive && cityParticles.length > 0 && now - lastParticleUpdate >= 80) {
+    lastParticleUpdate = now
+    particleFrame += 1
+
+    for (const idx of prevParticleTouched) {
+      particleScratch[idx] = 0
+      const el = dotElements[idx]
+      if (el) {
+        el.style.removeProperty('--particle')
+        el.style.removeProperty('--particle-color')
+      }
+    }
+
+    const particleTouched = []
+    for (const cp of cityParticles) {
+      const apply = (px, py, opacity, color) => {
+        const offsetCol = Math.round((px - PATTERN_GRID / 2) / PARTICLE_HALO_SCALE)
+        const offsetRow = Math.round((py - PATTERN_GRID / 2) / PARTICLE_HALO_SCALE)
+        const col = cp.col + offsetCol
+        const row = cp.row + offsetRow
+        if (col < 0 || col >= cols.value || row < 0 || row >= rows.value) return
+        const idx = row * cols.value + col
+        if (idx === cp.index) return // 도시 마커 칸 자체는 건너뛴다(마커 색과 겹치지 않게)
+        if (particleScratch[idx] === 0) particleTouched.push(idx)
+        if (opacity > particleScratch[idx]) {
+          particleScratch[idx] = opacity
+          particleColor[idx] = color
+        }
+      }
+      if (cp.condition === 'rain') computeRainFrame(particleFrame, apply, cp.drops)
+      else if (cp.condition === 'snow') computeSnowFrame(particleFrame, apply, cp.flakes)
+      else if (cp.condition === 'fog') computeFogFrame(particleFrame, apply, cp.layers)
+    }
+
+    for (const idx of particleTouched) {
+      const el = dotElements[idx]
+      if (!el) continue
+      el.style.setProperty('--particle', particleScratch[idx])
+      el.style.setProperty('--particle-color', particleColor[idx])
+    }
+    prevParticleTouched = particleTouched
+    needMore = true
+  } else if (props.particlesEnabled && cityParticles.length > 0) {
+    needMore = true
+  }
+
   if (ripples.length > 0 || presses.length > 0 || bursts.length > 0) needMore = true
 
   if (needMore) {
@@ -789,19 +1073,39 @@ onMounted(() => {
   // (pointerdown/move는 지도 안에서만 의미가 있어 템플릿에 직접 바인딩한다).
   window.addEventListener('pointerup', endPointer)
   window.addEventListener('pointercancel', endPointer)
+  window.addEventListener('keydown', handleKeydown)
+
+  // 레이더/파티클은 사용자 조작과 무관하게 계속 돌아야 하므로, 마운트 시 한 번 rAF 루프를
+  // 깨워둔다(이후엔 tick() 안에서 needMore로 스스로 계속 돈다).
+  if (props.radarEnabled || props.particlesEnabled) ensureTicking()
 })
+
+// 토글이 꺼지면 tick()의 needMore가 결국 false가 되어 루프가 멈춘다 — 다시 켜졌을 때
+// 누군가 지도를 조작하지 않아도 루프가 재개되도록 여기서 다시 깨운다.
+watch(
+  () => [props.radarEnabled, props.particlesEnabled],
+  ([radar, particles]) => {
+    if (radar || particles) ensureTicking()
+  },
+)
 
 onUnmounted(() => {
   resizeObserver?.disconnect()
   rootRef.value?.removeEventListener('wheel', handleWheel)
   window.removeEventListener('pointerup', endPointer)
   window.removeEventListener('pointercancel', endPointer)
+  window.removeEventListener('keydown', handleKeydown)
   if (rafId) cancelAnimationFrame(rafId)
   clearTimeout(comboFlashTimeoutId)
   clearTimeout(shakeTimeoutId)
 })
 
 function handleCityDotClick(dot, event) {
+  if (compareMode.value) {
+    spawnBurst(dot.col, dot.row)
+    handleCompareClick(dot)
+    return
+  }
   spawnBurst(dot.col, dot.row)
   emit('select-city', { city: dot.city, rect: event.currentTarget.getBoundingClientRect() })
 }
@@ -926,7 +1230,18 @@ function showHint(col, row) {
   }
 }
 
-defineExpose({ spawnBurst, mapToColRow, flashKorea, shakeKorea, showHint, clearHint, zoomToKorea, resetZoom, describeCell })
+defineExpose({
+  spawnBurst,
+  mapToColRow,
+  flashKorea,
+  shakeKorea,
+  showHint,
+  clearHint,
+  zoomToKorea,
+  resetZoom,
+  describeCell,
+  toggleCompareMode,
+})
 
 // 날씨 도시·지명 픽셀 공용 호버 핸들러 — 툴팁 위치 계산 로직은 둘이 같고, 표시 내용만
 // 템플릿에서 dot.city/dot.landmark 여부로 갈린다.
@@ -950,6 +1265,7 @@ function handleDotHover(dot, event) {
       'is-game-active': gameActive,
       'is-combo-flashing': isComboFlashing,
       'is-game-over-shaking': isGameOverShaking,
+      'is-compare-mode': compareMode,
     }"
     @pointerdown="handlePointerDown"
     @pointermove="handlePointerMove"
@@ -996,6 +1312,12 @@ function handleDotHover(dot, event) {
       {{ hoveredDot.city?.name ?? hoveredDot.landmark?.name }}
       {{ hoveredDot.city ? (CONDITION_LABELS_KR[hoveredDot.city.condition] ?? '') : '' }}
     </div>
+
+    <div v-if="comparePopup" class="korea-map__bubble korea-map__bubble--compare"
+      :style="{ left: `${comparePopup.left}px`, top: `${comparePopup.top}px` }">
+      {{ comparePopup.cityAName }} ↔ {{ comparePopup.cityBName }}<br />
+      온도차 {{ comparePopup.tempDiff }}° · 습도차 {{ comparePopup.humidityDiff }}%p · {{ comparePopup.cellDistance }}칸
+    </div>
   </div>
 </template>
 
@@ -1014,6 +1336,34 @@ function handleDotHover(dot, event) {
 /* "한반도 지역 찾기" 게임 진행 중에는 지도 전체가 클릭 가능한 게임판임을 커서로 알린다. */
 .korea-map.is-game-active .korea-map__dot {
   cursor: crosshair;
+}
+
+/* 두 도시 비교 모드: 도시 도트 위에서 커서가 십자선으로 바뀌어 "선택 가능"임을 알린다. */
+.korea-map.is-compare-mode .korea-map__dot.is-city {
+  cursor: crosshair;
+}
+
+/* 비교 경로 — 출발→도착 방향으로 순서대로 반짝이며 이어지는 것처럼 보이게, 칸마다 다른
+   --compare-delay(JS가 부여)를 준다. */
+.korea-map__dot.is-compare-path {
+  animation: korea-compare-pulse 1s ease-in-out infinite;
+  animation-delay: var(--compare-delay, 0s);
+}
+
+@keyframes korea-compare-pulse {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.7);
+  }
+}
+
+.korea-map__bubble--compare {
+  transform: translate(-50%, calc(-100% - 12px));
+  text-align: center;
+  line-height: 1.6;
 }
 
 .korea-map__viewport {
@@ -1039,10 +1389,20 @@ function handleDotHover(dot, event) {
      크림 화이트(--dot-lit)와 섞여, 물결이 반짝이는 "윤슬"처럼 보이게 한다. burst(선택
      이펙트)는 한 겹 더 --burst-color(기본값 크림 화이트, 오답이면 빨간색)로 섞는다. */
   background: #7cc0cb; /* color-mix 미지원 환경 폴백 */
+  /* 가장 바깥 두 겹(파티클·레이더)이 날씨 파티클/레이더 스윕 오버레이, 안쪽 두 겹은 기존
+     파동(--intensity)·선택 폭발(--burst) 로직 그대로다. */
   background-color: color-mix(
     in srgb,
-    var(--burst-color, var(--dot-lit)) calc(var(--burst, 0) * 100%),
-    color-mix(in srgb, var(--dot-lit) calc(var(--intensity, 0) * 100%), #7cc0cb)
+    var(--particle-color, var(--dot-lit)) calc(var(--particle, 0) * 70%),
+    color-mix(
+      in srgb,
+      #fff2b8 calc(var(--radar, 0) * 45%),
+      color-mix(
+        in srgb,
+        var(--burst-color, var(--dot-lit)) calc(var(--burst, 0) * 100%),
+        color-mix(in srgb, var(--dot-lit) calc(var(--intensity, 0) * 100%), #7cc0cb)
+      )
+    )
   );
   transform: scale(calc(1 + var(--burst, 0) * 0.8));
   filter: brightness(calc(1 + var(--burst, 0) * 1.2));
@@ -1054,7 +1414,15 @@ function handleDotHover(dot, event) {
 
 .korea-map__dot.is-land {
   /* 평소엔 그대로 육지색, burst가 있으면 --burst-color(기본 크림 화이트, 오답이면 빨간색)로 섞인다. */
-  background-color: color-mix(in srgb, var(--burst-color, var(--dot-lit)) calc(var(--burst, 0) * 100%), var(--dot-lit));
+  background-color: color-mix(
+    in srgb,
+    var(--particle-color, var(--dot-lit)) calc(var(--particle, 0) * 70%),
+    color-mix(
+      in srgb,
+      #fff2b8 calc(var(--radar, 0) * 45%),
+      color-mix(in srgb, var(--burst-color, var(--dot-lit)) calc(var(--burst, 0) * 100%), var(--dot-lit))
+    )
+  );
   /* 프레스는 어두워지고 오그라들고, burst(선택 이펙트)는 반대로 밝아지며 부풀어 오른다 —
      둘 다 같은 도트에서 동시에 일어날 수 있어 한 식에서 합성한다. */
   filter: brightness(calc(1 - var(--intensity, 0) * 0.4 + var(--burst, 0) * 1.2));
@@ -1282,7 +1650,8 @@ function handleDotHover(dot, event) {
 
   .korea-map__dot,
   .korea-map__dot.is-land,
-  .korea-map__dot.is-hint {
+  .korea-map__dot.is-hint,
+  .korea-map__dot.is-compare-path {
     animation: none !important;
     transform: none !important;
     filter: none !important;

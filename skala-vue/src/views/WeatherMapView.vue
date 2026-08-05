@@ -275,19 +275,107 @@ const mascotCondition = computed(() => {
   return 'rain'
 })
 
-// 낮/밤 지도 톤 — 대표 도시(서울)의 일출/일몰과 현재 시각을 비교해 밤이면 지도 전체를
-// 살짝 어둡게 낮춘다. 도시마다 일출·일몰이 조금씩 달라 정확히 "우리 동네 기준"은 아니지만,
-// 전국이 한 화면에 다 보이는 지도 특성상 대표 도시 하나로 근사해도 충분하다.
+// --- 시간대 슬라이더 ---
+// 실제 "지금" 대신 임의의 시각(0~24시)을 지정해 지도의 낮/밤 톤·바다색을 미리 볼 수 있게
+// 한다. null이면(슬라이더를 만지지 않은 기본 상태) 지금까지처럼 항상 실제 현재 시각을 쓴다.
+const timeOverrideHour = ref(null)
+
+function hourFromUnix(unixSeconds) {
+  const d = new Date(unixSeconds * 1000)
+  return d.getHours() + d.getMinutes() / 60
+}
+
+const effectiveHour = computed(() => {
+  if (timeOverrideHour.value != null) return timeOverrideHour.value
+  const now = new Date()
+  return now.getHours() + now.getMinutes() / 60
+})
+
+// 슬라이더 v-model용 get/set 프록시 — 조작 전에는 지금 시각을 그대로 보여주다가, 사용자가
+// 움직이는 순간부터 timeOverrideHour가 값을 갖는다.
+const sliderHour = computed({
+  get: () => effectiveHour.value,
+  set: (value) => {
+    timeOverrideHour.value = value
+  },
+})
+
+function resetTimeOverride() {
+  timeOverrideHour.value = null
+}
+
+const formattedEffectiveHour = computed(() => {
+  const hour = ((effectiveHour.value % 24) + 24) % 24
+  const h = Math.floor(hour).toString().padStart(2, '0')
+  const m = Math.round((hour - Math.floor(hour)) * 60)
+    .toString()
+    .padStart(2, '0')
+  return `${h}:${m}`
+})
+
+// 낮/밤 지도 톤 — 대표 도시(서울)의 일출/일몰과 (슬라이더로 바꾼) 시각을 비교해 밤이면
+// 지도 전체를 살짝 어둡게 낮춘다. 도시마다 일출·일몰이 조금씩 달라 정확히 "우리 동네 기준"은
+// 아니지만, 전국이 한 화면에 다 보이는 지도 특성상 대표 도시 하나로 근사해도 충분하다.
 const isNight = computed(() => {
   const seoul = cityList.value.find((city) => city.id === 'city_01')
   if (!seoul?.sunrise || !seoul?.sunset) return false
-  const now = Date.now() / 1000
-  return now < seoul.sunrise || now > seoul.sunset
+  if (timeOverrideHour.value == null) {
+    const now = Date.now() / 1000
+    return now < seoul.sunrise || now > seoul.sunset
+  }
+  const sunriseHour = hourFromUnix(seoul.sunrise)
+  const sunsetHour = hourFromUnix(seoul.sunset)
+  return effectiveHour.value < sunriseHour || effectiveHour.value > sunsetHour
 })
+
+// 시각별 바다색 — 자정 짙은 남색 → 새벽 보랏빛 주황 → 한낮 기본 --sea 색 → 노을 주황 → 다시 밤
+// 순으로 선형 보간한다. 슬라이더를 안 만졌을 때도 실제 시각 기준으로 항상 계산되지만,
+// 낮 시간대(9~17시)는 기존 --sea 색과 동일해 평소엔 눈에 띄는 변화가 없다.
+const SEA_TONE_STOPS = [
+  { hour: 0, color: [43, 58, 85] },
+  { hour: 5, color: [43, 58, 85] },
+  { hour: 7, color: [201, 161, 92] },
+  { hour: 9, color: [92, 156, 168] },
+  { hour: 17, color: [92, 156, 168] },
+  { hour: 19, color: [217, 138, 74] },
+  { hour: 21, color: [43, 58, 85] },
+  { hour: 24, color: [43, 58, 85] },
+]
+function lerpColor(a, b, t) {
+  return a.map((v, i) => Math.round(v + (b[i] - v) * t))
+}
+const seaTone = computed(() => {
+  const hour = ((effectiveHour.value % 24) + 24) % 24
+  for (let i = 0; i < SEA_TONE_STOPS.length - 1; i++) {
+    const cur = SEA_TONE_STOPS[i]
+    const next = SEA_TONE_STOPS[i + 1]
+    if (hour >= cur.hour && hour <= next.hour) {
+      const t = (hour - cur.hour) / (next.hour - cur.hour || 1)
+      const [r, g, b] = lerpColor(cur.color, next.color, t)
+      return `rgb(${r}, ${g}, ${b})`
+    }
+  }
+  return 'rgb(92, 156, 168)'
+})
+
+// --- 지도 효과 토글: 레이더 스윕 · 날씨 파티클 · 두 도시 비교 ---
+// 시스템이 "동작 줄이기"를 요청한 경우 기본값을 꺼진 상태로 시작한다.
+const prefersReducedMotion =
+  typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+const radarEnabled = ref(!prefersReducedMotion)
+const particlesEnabled = ref(!prefersReducedMotion)
+
+const isCompareMode = ref(false)
+function handleCompareModeChange(value) {
+  isCompareMode.value = value
+}
+function toggleCompareMode() {
+  mapDotsRef.value?.toggleCompareMode()
+}
 </script>
 
 <template>
-  <div class="weather-map" :class="{ 'is-night': isNight }">
+  <div class="weather-map" :class="{ 'is-night': isNight }" :style="{ '--sea-tone': seaTone }">
     <p v-if="isLoading" class="status-message">날씨 정보를 불러오는 중...</p>
     <p v-else-if="loadError" class="status-message status-message--error">{{ loadError }}</p>
 
@@ -295,11 +383,13 @@ const isNight = computed(() => {
       <div class="weather-map__body">
         <div class="weather-map__grid-area">
           <KoreaMapDots ref="mapDotsRef" :cities="cityList" :landmarks="MAP_LANDMARKS" :selected-id="selectedId"
-            :game-active="game.status.value === 'playing'" @select-city="selectCity" @map-pick="handleMapPick" />
+            :game-active="game.status.value === 'playing'" :radar-enabled="radarEnabled"
+            :particles-enabled="particlesEnabled" @select-city="selectCity" @map-pick="handleMapPick"
+            @compare-mode-change="handleCompareModeChange" />
         </div>
 
-        <!-- 정보창: 즐겨찾기 + 오늘의 순위를 한 창에 통합. 넓은 화면에서는 헤더를 잡고 끄는
-             드래그 창, ≤1000px에서는 하단 탭으로 여닫는 시트로 바뀐다(CSS). -->
+        <!-- 정보창: 즐겨찾기 + 오늘의 순위 + 지도 효과 토글을 한 창에 통합. 넓은 화면에서는
+             헤더를 잡고 끄는 드래그 창, ≤1000px에서는 하단 탭으로 여닫는 시트로 바뀐다(CSS). -->
         <div class="map-window map-window--info" data-draggable-window :class="{ 'is-sheet-open': mobileSheet === 'info' }"
           :style="{ '--win-x': `${infoWindowDrag.position.value.x}px`, '--win-y': `${infoWindowDrag.position.value.y}px` }">
           <div class="map-window__header" @pointerdown="infoWindowDrag.startDrag">
@@ -307,6 +397,29 @@ const isNight = computed(() => {
             <span>즐겨찾기 · 오늘의 순위</span>
           </div>
           <div class="map-window__body">
+            <section class="map-window__section">
+              <h3 class="map-window__section-title">지도 효과</h3>
+              <label class="map-window__toggle">
+                <input v-model="radarEnabled" type="checkbox" />
+                레이더 스윕
+              </label>
+              <label class="map-window__toggle">
+                <input v-model="particlesEnabled" type="checkbox" />
+                날씨 파티클
+              </label>
+              <button class="map-window__compare-btn" :class="{ 'is-active': isCompareMode }"
+                :disabled="game.status.value === 'playing'" @click="toggleCompareMode">
+                {{ isCompareMode ? '두 도시 비교 종료' : '두 도시 비교' }}
+              </button>
+              <div class="map-window__time">
+                <span class="map-window__time-label">시간대 {{ formattedEffectiveHour }}</span>
+                <input v-model.number="sliderHour" type="range" min="0" max="23.9" step="0.1" class="map-window__time-slider" />
+                <button v-if="timeOverrideHour !== null" class="map-window__time-reset" @click="resetTimeOverride">
+                  현재 시각으로
+                </button>
+              </div>
+            </section>
+
             <section class="map-window__section">
               <h3 class="map-window__section-title">즐겨찾기</h3>
               <!-- 이름+온도만 보여주던 목록을, 온도·습도·풍속을 한눈에 비교할 수 있는 표로
@@ -458,9 +571,12 @@ const isNight = computed(() => {
   min-height: calc(100dvh - var(--nav-h, 57px));
   margin: 0;
   padding: 0;
-  background-color: var(--sea);
+  /* --sea-tone은 시간대 슬라이더(seaTone computed)가 매번 계산해 내려주는 값 — 낮 시간대는
+     기존 --sea와 같은 색이라 슬라이더를 안 만지면 눈에 띄는 변화가 없다. */
+  background-color: var(--sea-tone, var(--sea));
   animation: sea-shimmer 6s ease-in-out infinite;
   will-change: filter;
+  transition: background-color 0.4s ease;
 }
 
 /* 낮/밤 톤 — sea-shimmer가 이미 filter를 계속 애니메이션하고 있어(찰랑이는 효과), 별도
@@ -536,6 +652,69 @@ const isNight = computed(() => {
   font-family: var(--font-pixel-kr);
   font-size: 13px;
   color: var(--ink);
+}
+
+.map-window__toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 6px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.map-window__compare-btn {
+  width: 100%;
+  margin: 4px 0 10px;
+  border: 1px solid var(--moss);
+  background: none;
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-family: var(--font-pixel-kr);
+  font-size: 12px;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.map-window__compare-btn.is-active {
+  background: var(--amber);
+  border-color: var(--amber);
+}
+
+.map-window__compare-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.map-window__time {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.map-window__time-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--moss);
+}
+
+.map-window__time-slider {
+  width: 100%;
+  accent-color: var(--amber);
+}
+
+.map-window__time-reset {
+  align-self: flex-start;
+  border: none;
+  background: none;
+  padding: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--amber);
+  text-decoration: underline;
+  cursor: pointer;
 }
 
 .map-window__subtitle {

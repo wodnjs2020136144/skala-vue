@@ -1,5 +1,13 @@
 <script setup>
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
+import {
+  computeFogFrame,
+  computeRainFrame,
+  computeSnowFrame,
+  createFogLayers,
+  createRainDrops,
+  createSnowFlakes,
+} from '../../../utils/pixelWeatherFrames'
 
 const props = defineProps({
   condition: {
@@ -117,121 +125,21 @@ function applyDot(dots, x, y, opacity, color, role) {
   }
 }
 
-// 비: 위는 뾰족하고 아래는 둥근 물방울 모양을 통째로 매 프레임 다시 그려서, 그 모양 그대로
-// 아래로 떨어지게 한다. 방울마다 위치·속도·시작 타이밍을 랜덤하게 둬 불규칙하게 떨어지고,
-// 한 칸에서 다음 칸으로 넘어갈 때 밝기를 섞어(crossfade) 매끄럽게 흐르는 느낌을 낸다.
-const RAINDROP_SHAPE = [
-  [0, 0],
-  [-1, 1],
-  [0, 1],
-  [1, 1],
-  [-1, 2],
-  [0, 2],
-  [1, 2],
-  [-2, 3],
-  [-1, 3],
-  [0, 3],
-  [1, 3],
-  [2, 3],
-  [-2, 4],
-  [-1, 4],
-  [0, 4],
-  [1, 4],
-  [2, 4],
-  [-1, 5],
-  [0, 5],
-  [1, 5],
-]
-const RAIN_DROPS = Array.from({ length: 9 }, () => ({
-  x: 2 + Math.floor(Math.random() * (GRID - 4)),
-  phase: Math.random() * 40,
-  speed: 0.8 + Math.random() * 0.6,
-}))
-const RAIN_COLOR = '#5b8fc7'
-// 비/눈/안개 공용 — 이 프레임에 켜지는 각 칸에 대해 apply(x, y, opacity, color)를 호출한다.
-// 반응형 배열을 만드는 buildXFrame(정적 렌더용)과, DOM에 직접 쓰는 imperative 루프
-// (애니메이션용) 양쪽에서 같은 계산 로직을 공유하기 위해 "무엇을 할지"만 콜백으로 뺐다.
-function computeRainFrame(frame, apply) {
-  const totalRows = GRID + 8
-  RAIN_DROPS.forEach(({ x, phase, speed }) => {
-    const exact = ((frame * speed + phase) % totalRows) - 6
-    const row = Math.floor(exact)
-    const frac = exact - row
-    ;[
-      [row, 1 - frac],
-      [row + 1, frac],
-    ].forEach(([cy, weight]) => {
-      if (weight <= 0.02) return
-      RAINDROP_SHAPE.forEach(([ox, oy]) => apply(x + ox, cy + oy, weight, RAIN_COLOR))
-    })
-  })
-}
+// 비/눈/안개 프레임 계산 자체(RAINDROP_SHAPE 등 포함)는 utils/pixelWeatherFrames.js로 뺐다
+// — 지도의 날씨 파티클 오버레이(KoreaMapDots.vue)가 같은 계산을 재사용한다. 입자 배열
+// (RAIN_DROPS 등)은 인스턴스마다 새로 만들어서, 아이콘 여러 개가 동시에 떠 있어도 서로
+// 다른 타이밍으로 움직이던 기존 동작을 유지한다.
+const RAIN_DROPS = createRainDrops()
 function buildRainFrame(frame) {
   const dots = emptyDots()
-  computeRainFrame(frame, (x, y, opacity, color) => applyDot(dots, x, y, opacity, color, 'drop'))
+  computeRainFrame(frame, (x, y, opacity, color) => applyDot(dots, x, y, opacity, color, 'drop'), RAIN_DROPS)
   return dots
 }
 
-// 눈: 눈송이마다 속도·타이밍은 랜덤하게 두되, x 위치는 겹치지 않도록 일정 간격의 레인(lane)에
-// 배정한 뒤 그 안에서만 살짝 흔들리게 해서 눈송이끼리 절대 겹치지 않게 한다.
-// 팔 길이 2칸짜리 큰 "+"로 키운 만큼, 레인 수를 줄이고 간격을 넉넉히 둔다.
-const SNOW_LANE_COUNT = 5
-const SNOW_LANE_WIDTH = GRID / SNOW_LANE_COUNT
-const SNOW_FLAKES = Array.from({ length: SNOW_LANE_COUNT }, (_, lane) => ({
-  x: Math.round(SNOW_LANE_WIDTH / 2 + lane * SNOW_LANE_WIDTH),
-  phase: Math.random() * 50,
-  speed: 0.12 + Math.random() * 0.08,
-}))
-// 참고 이미지의 6~8방향 결정 눈송이처럼, 팔마다 끝에 작은 가지(flare)를 붙인 별 모양.
-const SNOW_FLAKE_SHAPE = [
-  [0, 0],
-  // 오른쪽 팔 + 끝 가지
-  [1, 0],
-  [2, 0],
-  [2, 1],
-  [2, -1],
-  // 왼쪽 팔 + 끝 가지
-  [-1, 0],
-  [-2, 0],
-  [-2, 1],
-  [-2, -1],
-  // 아래쪽 팔 + 끝 가지
-  [0, 1],
-  [0, 2],
-  [1, 2],
-  [-1, 2],
-  // 위쪽 팔 + 끝 가지
-  [0, -1],
-  [0, -2],
-  [1, -2],
-  [-1, -2],
-  // 대각선 짧은 팔 4개
-  [1, 1],
-  [-1, 1],
-  [1, -1],
-  [-1, -1],
-]
-const SNOW_COLOR = '#dcf0fa'
-function computeSnowFrame(frame, apply) {
-  const totalRows = GRID + 4
-  SNOW_FLAKES.forEach(({ x, phase, speed }) => {
-    const exact = ((frame * speed + phase) % totalRows) - 2
-    const row = Math.floor(exact)
-    const frac = exact - row
-    const sway = Math.sin((frame + phase * 10) * 0.02)
-    const cx = x + Math.round(sway)
-    ;[
-      [row, 1 - frac],
-      [row + 1, frac],
-    ].forEach(([cy, weight]) => {
-      if (weight <= 0.02) return
-      SNOW_FLAKE_SHAPE.forEach(([ox, oy]) => apply(cx + ox, cy + oy, weight, SNOW_COLOR))
-    })
-  })
-}
+const SNOW_FLAKES = createSnowFlakes()
 function buildSnowFrame(frame) {
   const dots = emptyDots()
-  computeSnowFrame(frame, (x, y, opacity, color) => applyDot(dots, x, y, opacity, color, 'flake'))
+  computeSnowFrame(frame, (x, y, opacity, color) => applyDot(dots, x, y, opacity, color, 'flake'), SNOW_FLAKES)
   return dots
 }
 
@@ -282,43 +190,10 @@ function buildThunderstorm() {
   return dots
 }
 
-// 안개: 넓고 납작한 가로 뭉치(층운) 여러 겹을 서로 다른 높이에 겹쳐 깔아, 실제 지면 안개처럼
-// 화면 폭 대부분을 가로지르는 형태로 표현한다. 각 층은 서로 다른 주기로 나타났다 사라지고,
-// 아주 천천히 좌우로 표류한다(모두 그 자리 그리드 칸의 밝기만 바뀌는 방식).
-// 길이(rx)는 짧은 것부터 긴 것까지 제각각 랜덤하게 둬서 일정한 길이로 보이지 않게 한다.
-const FOG_LAYER_ROWS = [8, 15, 22, 30]
-const FOG_LAYERS = FOG_LAYER_ROWS.map((baseY, i) => {
-  const ellipseCount = 1 + Math.round(Math.random())
-  const ellipses = Array.from({ length: ellipseCount }, () => ({
-    cx: Math.random() * GRID,
-    cy: baseY + (Math.random() - 0.5) * 2,
-    rx: 3 + Math.random() * 13,
-    ry: 2 + Math.random() * 1.4,
-  }))
-  return { ellipses, phase: i * 14 + Math.random() * 8 }
-})
-const FOG_PERIOD = 60
-const FOG_COLOR = '#a7acae'
-function computeFogFrame(frame, apply) {
-  FOG_LAYERS.forEach((layer) => {
-    const t = (frame + layer.phase) % FOG_PERIOD
-    const opacity = Math.max(0, Math.sin((t / FOG_PERIOD) * Math.PI * 2))
-    if (opacity <= 0.02) return
-    const driftX = Math.sin((frame + layer.phase) * 0.02) * 2
-    layer.ellipses.forEach((e) => {
-      for (let y = 0; y < GRID; y++) {
-        for (let x = 0; x < GRID; x++) {
-          if (isInsideEllipse(x, y, e.cx + driftX, e.cy, e.rx, e.ry)) {
-            apply(x, y, opacity, FOG_COLOR)
-          }
-        }
-      }
-    })
-  })
-}
+const FOG_LAYERS = createFogLayers()
 function buildFogFrame(frame) {
   const dots = emptyDots()
-  computeFogFrame(frame, (x, y, opacity, color) => applyDot(dots, x, y, opacity, color, 'fog'))
+  computeFogFrame(frame, (x, y, opacity, color) => applyDot(dots, x, y, opacity, color, 'fog'), FOG_LAYERS)
   return dots
 }
 
@@ -385,9 +260,9 @@ function tickFrame() {
     }
   }
 
-  if (props.condition === 'rain') computeRainFrame(frameCount, apply)
-  else if (props.condition === 'snow') computeSnowFrame(frameCount, apply)
-  else if (props.condition === 'fog') computeFogFrame(frameCount, apply)
+  if (props.condition === 'rain') computeRainFrame(frameCount, apply, RAIN_DROPS)
+  else if (props.condition === 'snow') computeSnowFrame(frameCount, apply, SNOW_FLAKES)
+  else if (props.condition === 'fog') computeFogFrame(frameCount, apply, FOG_LAYERS)
 
   for (const idx of touchedThisFrame) {
     const el = dotElements[idx]
