@@ -33,3 +33,81 @@ body {
   color: var(--ink);
   font-family: var(--font-mono);
 }
+
+/* 실습 데모 컴포넌트(src/components/practices/**) 26개가 공통으로 쓰는 클래스 —
+   컴포넌트마다 이 클래스만 붙여둔 채 스타일은 정의돼 있지 않았다(완전히 죽어있던 클래스).
+   여기 한 번만 정의해두면 각 데모 파일을 건드리지 않고도 전부 같은 카드 톤으로 보인다. */
+.practice-section {
+  background: var(--paper);
+  border: 1px solid rgba(94, 107, 90, 0.25);
+  border-radius: 12px;
+  padding: 20px;
+}
+
+.practice-section h2 {
+  margin: 0 0 12px;
+  font-family: var(--font-pixel-kr);
+  font-size: 16px;
+  color: var(--ink);
+  letter-spacing: 0.04em;
+}
+
+.practice-section h3 {
+  margin: 16px 0 8px;
+  font-family: var(--font-pixel-kr);
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.practice-section p {
+  margin: 0 0 8px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--moss);
+  line-height: 1.6;
+}
+
+.practice-section button {
+  font-family: var(--font-pixel-kr);
+  font-size: 12px;
+  border: 1px solid var(--moss);
+  background: none;
+  color: var(--ink);
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.practice-section button:hover {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+
+/* Day1~4 실습 뷰(src/views/practices/PracticesDay*.vue) 공통 레이아웃 — 원래 각 파일이
+   인라인 style="padding: 20px"만 갖고 있어 와이드 화면에서 데모가 왼쪽 끝에 붙어 늘어지고,
+   구분선도 브라우저 기본 <hr>이었다. */
+.practice-day {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 28px 20px 60px;
+}
+
+.practice-day__title {
+  margin: 0 0 20px;
+  font-family: var(--font-pixel-kr);
+  font-size: 20px;
+  color: var(--ink);
+  letter-spacing: 0.05em;
+}
+
+.practice-day hr {
+  border: none;
+  border-top: 1px dashed var(--moss);
+  margin: 24px 0;
+}
+
+@media (max-width: 640px) {
+  .practice-day {
+    padding: 18px 16px 40px;
+  }
+}

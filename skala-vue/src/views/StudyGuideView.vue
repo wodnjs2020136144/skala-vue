@@ -11,7 +11,6 @@ const html = computed(() => marked.parse(guideRaw))
   <div class="study-guide">
     <div class="study-guide__header">
       <h1 class="study-guide__title">스터디 가이드</h1>
-      <p class="study-guide__source">문서 원본: <code>docs/vue-study-guide.md</code></p>
     </div>
 
     <div class="study-guide__card">
@@ -32,29 +31,21 @@ const html = computed(() => marked.parse(guideRaw))
 }
 
 .study-guide__title {
-  margin: 0 0 6px;
+  margin: 0;
   font-family: var(--font-pixel-kr);
-  font-size: 22px;
+  font-size: 26px;
   color: var(--ink);
   letter-spacing: 0.05em;
 }
 
-.study-guide__source {
-  margin: 0;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--moss);
-}
-
-.study-guide__source code {
-  color: var(--amber);
-}
-
+/* 카드 배경(--paper)이 body 배경과 같은 색이라 그림자 하나만으로는 경계가 거의 안 보였다 —
+   테두리를 더하고 그림자도 살짝 키웠다. */
 .study-guide__card {
   background: var(--paper);
+  border: 1px solid rgba(94, 107, 90, 0.25);
   border-radius: 20px;
   padding: 32px;
-  box-shadow: 0 1px 3px rgba(20, 20, 30, 0.08);
+  box-shadow: 0 4px 12px rgba(20, 20, 30, 0.12);
 }
 
 .study-guide__body {
@@ -64,7 +55,9 @@ const html = computed(() => marked.parse(guideRaw))
   color: var(--ink);
 }
 
-/* v-html로 주입된 콘텐츠는 scoped 스타일이 안 먹으므로 :deep()으로 지정 */
+/* v-html로 주입된 콘텐츠는 scoped 스타일이 안 먹으므로 :deep()으로 지정.
+   h1/h2/h3가 각각 밑줄/글자색/무장식으로 서로 다른 축을 쓰던 걸, "좌측 amber 바"
+   하나의 축으로 통일하고 두께·크기로만 위계를 구분한다. */
 .study-guide__body :deep(h1),
 .study-guide__body :deep(h2),
 .study-guide__body :deep(h3) {
@@ -72,24 +65,30 @@ const html = computed(() => marked.parse(guideRaw))
   color: var(--ink);
   letter-spacing: 0.04em;
   line-height: 1.4;
+  border-left-style: solid;
+  border-left-color: var(--amber);
 }
 
 .study-guide__body :deep(h1) {
-  font-size: 20px;
+  font-size: 21px;
   margin: 36px 0 16px;
-  padding-bottom: 10px;
-  border-bottom: 3px solid var(--amber);
+  padding: 2px 0 2px 14px;
+  border-left-width: 5px;
 }
 
 .study-guide__body :deep(h2) {
   font-size: 17px;
   margin: 32px 0 12px;
-  color: var(--amber);
+  padding: 1px 0 1px 11px;
+  border-left-width: 3px;
 }
 
 .study-guide__body :deep(h3) {
   font-size: 14px;
   margin: 20px 0 8px;
+  padding-left: 9px;
+  border-left-width: 2px;
+  border-left-color: var(--moss);
 }
 
 .study-guide__body :deep(p) {

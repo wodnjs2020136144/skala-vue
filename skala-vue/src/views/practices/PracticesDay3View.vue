@@ -6,7 +6,8 @@ import AxiosJsonDemo from '../../components/practices/axios/AxiosJsonDemo.vue'
 </script>
 
 <template>
-  <div style="padding: 20px">
+  <div class="practice-day">
+    <h2 class="practice-day__title">Day 3 — Pinia / Axios</h2>
     <StoreCounterDemo />
     <hr />
     <AxiosWeatherDemo />

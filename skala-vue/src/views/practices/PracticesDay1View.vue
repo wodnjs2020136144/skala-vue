@@ -15,7 +15,8 @@ import FontAwesomeDemo from '../../components/practices/library/FontAwesomeDemo.
 </script>
 
 <template>
-  <div style="padding: 20px">
+  <div class="practice-day">
+    <h2 class="practice-day__title">Day 1 — Vue 문법(디렉티브·이벤트·폼)</h2>
     <SampleOne />
     <SampleTwo />
     <hr />

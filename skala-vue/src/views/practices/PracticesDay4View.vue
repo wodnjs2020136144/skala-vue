@@ -9,7 +9,8 @@ import AsyncChainChallenge from '../../components/practices/modernjs/AsyncChainC
 </script>
 
 <template>
-  <div style="padding: 20px">
+  <div class="practice-day">
+    <h2 class="practice-day__title">Day 4 — UI 라이브러리(Element Plus) / Modern JavaScript</h2>
     <SignupFormChallenge />
     <hr />
     <ProductQuantityChallenge />

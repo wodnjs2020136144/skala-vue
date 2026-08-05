@@ -2337,6 +2337,98 @@ const seaTone = computed(() => {
 
 ---
 
+## 32. 실습 모음 · 스터디 가이드 · 404 디자인을 앱 전체 테마로 통일
+
+**요구사항**
+- 실습 모음(Day1~4 뷰, 데모 컴포넌트 30개), 스터디 가이드, 404 페이지의 디자인을 다시 검토한다.
+
+**사고 과정**
+- 조사해보니 이 세 영역은 날씨/지도 탭에 적용된 레트로 테마(`--paper`/`--ink`/`--moss`/`--amber` 등 CSS 변수, `--font-pixel-kr`)를 한 번도 쓰지 않고 있었다 — `#9ba1a8`, `#ffffff`, `#2e3238`, `#f1f2f4` 같은 구버전 회색 팔레트가 그대로 남아 있어서, 같은 앱인데도 탭을 넘어가면 다른 사이트처럼 보였다.
+- 특히 데모 컴포넌트 30개가 전부 `class="practice-section"`을 달고 있는데 그 클래스의 CSS가 프로젝트 어디에도 정의돼 있지 않은 "죽은 클래스"였다 — 이걸 전역으로 한 번만 정의하면 30개 파일을 하나도 안 건드리고 전부 톤을 맞출 수 있다고 판단해 가장 먼저 처리했다.
+- 스터디 가이드는 반대로 이미 토큰을 가장 잘 쓰고 있었지만, 카드 배경이 body 배경과 완전히 같은 색이라 그림자 하나만으로는 경계가 거의 안 보이는 문제와, 문서 안 h1(밑줄)/h2(글자색)/h3(무장식)가 서로 다른 축으로 강조돼 있어 위계가 헷갈리는 문제가 있었다.
+
+**해결 과정**
+1. `.practice-section`(실습 데모 30개 공용, 지금까지 정의 없던 클래스)과 `.practice-day`(Day1~4 뷰 공용 레이아웃)를 전역으로 정의했다.
+
+#### 파일 경로: `src/assets/retro-theme.css`
+```css
+.practice-section {
+  background: var(--paper);
+  border: 1px solid rgba(94, 107, 90, 0.25);
+  border-radius: 12px;
+  padding: 20px;
+}
+/* h2/h3/p/button도 함께 톤 통일 */
+
+.practice-day {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 28px 20px 60px;
+}
+.practice-day hr {
+  border: none;
+  border-top: 1px dashed var(--moss);
+  margin: 24px 0;
+}
+```
+
+2. `PracticesIndexView.vue`/`NotFoundView.vue`의 하드코딩 회색을 CSS 변수로 교체했다.
+
+#### 파일 경로: `src/views/practices/PracticesIndexView.vue`
+```css
+.practices-index__link {
+  background: var(--paper);
+  border: 1px solid rgba(94, 107, 90, 0.25);
+  color: var(--ink);
+  font-family: var(--font-mono);
+}
+.practices-index__link:hover {
+  background: rgba(94, 107, 90, 0.1);
+}
+```
+
+3. `PracticesDay1View.vue`~`Day4View.vue`의 인라인 `style="padding: 20px"`를 `.practice-day` 클래스로 바꾸고, 상단에 어떤 주제인지 알리는 제목을 추가했다(기존엔 데모가 바로 시작돼 맥락이 없었다).
+
+#### 파일 경로: `src/views/practices/PracticesDay1View.vue`
+```html
+<div class="practice-day">
+  <h2 class="practice-day__title">Day 1 — Vue 문법(디렉티브·이벤트·폼)</h2>
+  <SampleOne />
+  ...
+</div>
+```
+
+4. `StudyGuideView.vue`에 카드 테두리를 추가하고, 문서 내 h1/h2/h3의 강조 방식을 "좌측 amber 바(굵기·색으로만 위계 구분)"로 통일했다. 페이지 타이틀(22→26px)과 문서 내 h1(21px)의 크기 차이도 벌려 위계를 분명히 했다. 개발자 메모 성격이던 "문서 원본: docs/…" 문구는 제거했다.
+
+#### 파일 경로: `src/views/StudyGuideView.vue`
+```css
+.study-guide__body :deep(h1),
+.study-guide__body :deep(h2),
+.study-guide__body :deep(h3) {
+  border-left-style: solid;
+  border-left-color: var(--amber);
+}
+.study-guide__body :deep(h1) { font-size: 21px; border-left-width: 5px; }
+.study-guide__body :deep(h2) { font-size: 17px; border-left-width: 3px; }
+.study-guide__body :deep(h3) { font-size: 14px; border-left-width: 2px; border-left-color: var(--moss); }
+```
+
+**트러블슈팅**
+- 없음.
+
+**결과**
+- `npm run lint`(기존 무관 오류 1건 제외)·`npx vite build` 통과.
+- Chrome 확장으로 확인: 실습 인덱스 카드가 크림색 배경으로 바뀌어 순백색이 아님, Day1~4 각각 제목이 보이고 중앙 정렬된 폭 안에 들어감. Day1 v-html/v-model 데모, Day3 Pinia 카운터, Day4 Element Plus 수량 스테퍼가 전부 정상 동작하고, **전역 `.practice-section button` 스타일이 Element Plus 버튼을 깨뜨리지 않음**(EP 고유 스타일이 그대로 유지됨)을 확인. 스터디 가이드는 카드 테두리로 배경과 구분되고, 문서 안 h1/h2/h3가 전부 좌측 amber 막대로 일관되게 보이며 "문서 원본" 문구가 사라짐. 404 페이지도 레트로 톤(크림 배경·검정 헤더·amber 라인)으로 표시. 콘솔 에러 없음.
+
+**결과 (이번 다섯 라운드 종합 배포)**
+- 1~5단계(도시 순서 정리 → 반응형 전체 대응 → 날씨 요약 개편 → 지도 인터랙티브 기능 4종 → 디자인 통일)를 각각 별도 커밋으로 나눠 순차적으로 검증·배포했다. 최종적으로 GitHub Pages(`https://wodnjs2020136144.github.io/skala-vue/`)에 전부 반영됨.
+
+**느낀점**
+- "디자인을 검토해달라"는 요청에서 가장 먼저 확인해야 했던 건 새 스타일을 어떻게 입힐지가 아니라 **이미 있는데 안 쓰이고 있는 것**(`.practice-section`처럼 정의가 아예 없는 클래스)을 찾는 일이었다 — 죽은 클래스 하나를 살리는 것만으로 30개 파일을 건드리지 않고 일관성을 확보할 수 있었던 게 이번 작업에서 가장 효율이 좋았던 지점이다.
+- 전역 CSS(예: `.practice-section button`)를 추가할 때는 그 셀렉터가 다른 라이브러리(Element Plus)의 컴포넌트에도 적용될 수 있는지 미리 생각해야 한다는 걸 새삼 느꼈다 — 이번엔 EP가 자기 클래스(`.el-button` 등)로 충분히 구체적인 스타일을 이미 갖고 있어 문제가 없었지만, 항상 그렇다는 보장은 없어서 브라우저로 실제 확인하는 단계를 건너뛰지 않은 게 다행이었다.
+
+---
+
 <!--
 아래 형식을 복사해서 작업 단위마다 항목을 추가합니다.
 

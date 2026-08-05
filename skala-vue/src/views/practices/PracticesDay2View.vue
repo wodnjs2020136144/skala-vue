@@ -8,7 +8,8 @@ import SlotDemo from '../../components/practices/component/SlotDemo.vue'
 </script>
 
 <template>
-  <div style="padding: 20px">
+  <div class="practice-day">
+    <h2 class="practice-day__title">Day 2 — Composition API / Component</h2>
     <ReactiveStateDemo />
     <hr />
     <ComputedWatchersDemo />
