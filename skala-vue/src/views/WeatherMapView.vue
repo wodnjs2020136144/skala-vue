@@ -426,14 +426,14 @@ function toggleCompareMode() {
                    확장했다(창 폭이 220px로 좁아 헤더는 축약). -->
               <div v-if="favoriteCitiesWithWeather.length > 0" class="fav-compare">
                 <div class="fav-compare__row fav-compare__row--head">
-                  <span>도시</span><span>기온</span><span>습도</span><span>풍속</span>
+                  <span>도시</span><span>기온</span><span>습도(%)</span><span>풍속(m/s)</span>
                 </div>
                 <button v-for="city in favoriteCitiesWithWeather" :key="city.id" class="fav-compare__row"
                   @click="selectCityById(city)">
                   <span class="fav-compare__name">{{ city.name }}</span>
                   <span>{{ convertTemp(city.temp) }}{{ configStore.unitSymbol }}</span>
-                  <span>{{ city.humidity }}%</span>
-                  <span>{{ city.windSpeed }}m/s</span>
+                  <span>{{ city.humidity }}</span>
+                  <span>{{ city.windSpeed }}</span>
                 </button>
               </div>
               <p v-else class="map-window__empty">
@@ -788,7 +788,7 @@ function toggleCompareMode() {
 
 .fav-compare__row {
   display: grid;
-  grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(28px, 0.6fr));
+  grid-template-columns: minmax(0, 1.2fr) repeat(3, minmax(30px, 0.7fr));
   align-items: center;
   gap: 4px;
   border: none;
@@ -800,6 +800,15 @@ function toggleCompareMode() {
   color: var(--ink);
   text-align: right;
   cursor: pointer;
+}
+
+/* 헤더/값 모든 칸이 좁은 창 폭에서 넘칠 수 있어(예: "3.5" 뒤 단위는 헤더로 뺐지만, 두 자리
+   습도·풍속 값도 여유가 빠듯하다) 넘치면 잘라내고 줄바꿈은 절대 하지 않게 방어한다. */
+.fav-compare__row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .fav-compare__row:hover {

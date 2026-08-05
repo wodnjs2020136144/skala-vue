@@ -328,8 +328,26 @@ let lastParticleUpdate = 0
 const PARTICLE_CONDITIONS = new Set(['rain', 'snow', 'fog'])
 const PARTICLE_HALO_SCALE = PATTERN_GRID / 8 // 36유닛 패턴을 지도 위 지름 8칸(반경 4칸)으로 압축
 
+// 리사이즈·데이터 재로드로 buildGrid가 다시 불릴 때, dotElements(DOM 노드)는 key가 같은
+// 칸이면 그대로 재사용된다. 그런데 아래서 radarScratch 등 버퍼를 통째로 새로 만들어버리면
+// 예전 버퍼가 갖고 있던 값을 참조해 지우던 로직(prevTouched 등)도 함께 리셋되어, 이미 DOM에
+// 인라인으로 박아둔 --radar/--intensity/--burst 값을 아무도 지우지 않게 된다 — 그 결과 레이더가
+// 지나간 자리가 밝은 채로 영구히 굳는 버그가 생겼다. 버퍼를 교체하기 전에 항상 이 함수로
+// 먼저 지운다.
+function clearDotOverlayStyles() {
+  for (const el of dotElements) {
+    if (!el) continue
+    el.style.removeProperty('--radar')
+    el.style.removeProperty('--intensity')
+    el.style.removeProperty('--press')
+    el.style.removeProperty('--burst')
+    el.style.removeProperty('--burst-color')
+  }
+}
+
 function buildGrid(width, height) {
   resetCompare() // 그리드가 다시 만들어지면 기존 비교 경로가 가리키던 DOM 인덱스가 무효해진다.
+  clearDotOverlayStyles()
   const dotPx = computeDotPx(height)
   const newCols = Math.max(1, Math.round(width / dotPx))
   const newRows = Math.max(1, Math.round(height / dotPx))
@@ -1081,11 +1099,22 @@ onMounted(() => {
 })
 
 // 토글이 꺼지면 tick()의 needMore가 결국 false가 되어 루프가 멈춘다 — 다시 켜졌을 때
-// 누군가 지도를 조작하지 않아도 루프가 재개되도록 여기서 다시 깨운다.
+// 누군가 지도를 조작하지 않아도 루프가 재개되도록 여기서 다시 깨운다. 꺼질 때는 감쇠가
+// 끝나길 기다리지 않고 잔광을 즉시 지운다(그렇지 않으면 마지막 프레임의 --radar 값이
+// 다음 tick 없이 DOM에 그대로 남는다).
 watch(
-  () => [props.radarEnabled, props.particlesEnabled],
-  ([radar, particles]) => {
-    if (radar || particles) ensureTicking()
+  () => props.radarEnabled,
+  (radar) => {
+    if (radar) {
+      ensureTicking()
+      return
+    }
+    for (const idx of radarActive) {
+      radarScratch[idx] = 0
+      radarInActive[idx] = 0
+      dotElements[idx]?.style.removeProperty('--radar')
+    }
+    radarActive = []
   },
 )
 

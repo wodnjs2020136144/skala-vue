@@ -48,12 +48,19 @@ const litCount = computed(() => Math.round((clampedValue.value / 100) * DOT_COUN
 .dot-stat-bar__head {
   display: flex;
   justify-content: space-between;
+  gap: 8px;
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--moss);
 }
 
+.dot-stat-bar__label {
+  flex-shrink: 0;
+}
+
 .dot-stat-bar__value {
+  min-width: 0;
+  text-align: right;
   color: var(--ink);
 }
 

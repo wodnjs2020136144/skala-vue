@@ -176,6 +176,7 @@ function formatTime(unixSeconds) {
 .weather-stats-panel__wind {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
   margin: 6px 0 0;
   font-family: var(--font-mono);
