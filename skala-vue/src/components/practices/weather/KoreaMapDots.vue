@@ -135,18 +135,18 @@ function pulseColor(city) {
   return CONDITION_ACCENT_COLORS[city.condition] ?? CONDITION_ACCENT_COLORS.sun
 }
 
-// 육지·바다처럼 도시 도트의 테두리(box-shadow)도 자기 색 그대로가 아니라 살짝 어둡게 —
-// 배경과 구분이 잘 안 되던 문제를 육지에 썼던 것과 같은 방식으로 해결한다.
-function darken(hex, amount = 0.15) {
-  const num = parseInt(hex.slice(1), 16)
-  const r = Math.round(((num >> 16) & 255) * (1 - amount))
-  const g = Math.round(((num >> 8) & 255) * (1 - amount))
-  const b = Math.round((num & 255) * (1 - amount))
-  return `rgb(${r}, ${g}, ${b})`
+// 도시 도트의 테두리는 더 이상 조건색을 어둡게 한 값이 아니라, 일반 육지(.is-land)와 완전히
+// 같은 값을 쓴다 — 도시가 지형 위에 붙은 스티커처럼 튀지 않고 자연스럽게 섞여 보이게 하고,
+// 대신 주변 칸에 흘리는 조건색 후광(HALO_*, buildGrid 참고)으로 존재를 드러낸다.
+const LAND_BORDER_COLOR = '#d1cabb'
+function markerBorderColor() {
+  return LAND_BORDER_COLOR
 }
-function markerBorderColor(city) {
-  return darken(markerColor(city.condition))
-}
+
+// 날씨 후광 반경(칸)과, 중심(도시)에서 멀어질수록 옅어지는 정도.
+const HALO_RADIUS = 2
+const HALO_MAX_STRENGTH = 0.3 // 인접 칸(거리 1)에서의 세기
+const HALO_FALLOFF = 0.09 // 거리 1칸당 세기가 줄어드는 양
 
 const rootRef = ref(null)
 const gridRef = ref(null)
@@ -282,6 +282,8 @@ function handleKeydown(event) {
 // landMask: 육지 여부(파동은 여기를 건너뛴다), frameScratch: 이번 프레임 강도.
 let landMask = new Uint8Array(0)
 let frameScratch = new Float32Array(0)
+// 바다 눌림(--press) 전용 버퍼 — frameScratch(파동 --intensity)와 별개다.
+let pressScratch = new Float32Array(0)
 // burst(선택 폭발) 전용 버퍼 — 파동/프레스와 달리 육지·바다 구분 없이 모든 칸에 적용된다.
 let burstScratch = new Float32Array(0)
 // burstScratch와 나란히, 각 칸에서 현재 가장 강한 burst가 정답(correct)인지 오답(wrong)인지
@@ -380,12 +382,38 @@ function buildGrid(width, height) {
     }
   }
 
+  // 날씨 후광 — 도시 도트 자체는 지형과 같은 테두리로 녹아들게 하는 대신(아래 CSS), 주변
+  // 육지 칸에 조건색을 옅게 흘려 그 일대가 "이 조건의 작은 기상 권역"임을 알린다. 정적으로
+  // 한 번만 계산해 CSS 커스텀 프로퍼티로 박아두므로 이후 매 프레임 비용은 0이다.
+  for (const [key, city] of cityByKey) {
+    const [cityCol, cityRow] = key.split(',').map(Number)
+    const color = CONDITION_ACCENT_COLORS[city.condition] ?? CONDITION_ACCENT_COLORS.sun
+    const minCol = Math.max(0, cityCol - HALO_RADIUS)
+    const maxCol = Math.min(newCols - 1, cityCol + HALO_RADIUS)
+    const minRow = Math.max(0, cityRow - HALO_RADIUS)
+    const maxRow = Math.min(newRows - 1, cityRow + HALO_RADIUS)
+    for (let row = minRow; row <= maxRow; row++) {
+      for (let col = minCol; col <= maxCol; col++) {
+        if (col === cityCol && row === cityRow) continue
+        const distance = Math.hypot(col - cityCol, row - cityRow)
+        if (distance > HALO_RADIUS) continue
+        const strength = Math.max(0, HALO_MAX_STRENGTH - distance * HALO_FALLOFF)
+        if (strength <= 0) continue
+        const dot = newDots[row * newCols + col]
+        if (!dot.isLand || dot.city) continue // 바다·다른 도시 칸은 후광을 건너뛴다
+        if (!dot.halo || strength > dot.halo.strength) dot.halo = { color, strength }
+      }
+    }
+  }
+
   dots.value = newDots
   landMask = newLandMask
   frameScratch = new Float32Array(cellCount)
+  pressScratch = new Float32Array(cellCount)
   burstScratch = new Float32Array(cellCount)
   burstVariant = Array.from({ length: cellCount }, () => null)
   prevTouched = []
+  prevPressTouched = []
   prevBurstTouched = []
 
   radarScratch = new Float32Array(cellCount)
@@ -535,6 +563,13 @@ const PRESS_RADIUS = 2.2 // 칸 — 퍼지지 않는 고정 크기
 const PRESS_DURATION = 550 // ms
 const MAX_PRESSES = 10
 
+// 바다 눌림: 육지 프레스보다 짧고 좁게 "꾹" 눌렸다가, 뒤이어 SEA_RIPPLE_DELAY 만큼 지나
+// spawnRipple이 파동을 띄운다(triggerCellEffect) — 눌린 자리에서 물결이 퍼져나가는 순서로
+// 보이게 한다.
+const SEA_PRESS_RADIUS = 1.8
+const SEA_PRESS_DURATION = 320 // ms
+const SEA_RIPPLE_DELAY = 180 // ms
+
 // 지역 선택 시 클릭한 픽셀에서 터지는 충격파. 파동/프레스와 달리 육지·바다를 가리지 않고
 // 모든 칸에 적용되며, 짧고 강하게 퍼졌다 빠르게 사그라든다.
 const BURST_MAX_RADIUS = 5.5 // 칸
@@ -554,20 +589,25 @@ const bursts = []
 let rafId = null
 let rafRunning = false
 let prevTouched = [] // 지난 프레임에 강도가 반영된 인덱스 — 이번 프레임에 지울 후보
+let prevPressTouched = [] // 바다 눌림(--press) 전용, frameScratch(--intensity)와 별도 관리
 let prevBurstTouched = []
 let lastActiveCol = null
 let lastActiveRow = null // 마지막으로 파동/프레스를 발생시킨 칸 — 같은 칸이면 재발생하지 않는다
 
-function spawnRipple(col, row) {
+// delayMs: 지금 당장이 아니라 조금 뒤에 시작하는 파동(바다 눌림 직후 퍼지는 연출용).
+function spawnRipple(col, row, delayMs = 0) {
   const now = performance.now()
   if (ripples.length >= MAX_RIPPLES) ripples.shift()
-  ripples.push({ col, row, startTime: now })
+  ripples.push({ col, row, startTime: now + delayMs })
 }
 
-function spawnPress(col, row) {
+// isSea면 육지 프레스보다 짧고 좁은 "바다 눌림"(--press, pressScratch)으로, 아니면 기존
+// 육지 프레스(--intensity, frameScratch)로 들어간다 — 둘은 밝아짐/어두워짐 방향이 반대라
+// 같은 버퍼를 공유할 수 없다.
+function spawnPress(col, row, isSea = false) {
   const now = performance.now()
   if (presses.length >= MAX_PRESSES) presses.shift()
-  presses.push({ col, row, startTime: now })
+  presses.push({ col, row, startTime: now, isSea })
 }
 
 // variant: 'correct'(기본, 기존과 같은 크림색 느낌) | 'wrong'(빨간색 — 오답 클릭 위치 표시용)
@@ -617,6 +657,11 @@ function tick(now) {
     const el = dotElements[idx]
     if (el) el.style.removeProperty('--intensity')
   }
+  for (const idx of prevPressTouched) {
+    pressScratch[idx] = 0
+    const el = dotElements[idx]
+    if (el) el.style.removeProperty('--press')
+  }
   for (const idx of prevBurstTouched) {
     burstScratch[idx] = 0
     burstVariant[idx] = null
@@ -628,11 +673,18 @@ function tick(now) {
   }
 
   const touchedThisFrame = []
+  const pressTouchedThisFrame = []
   const burstTouchedThisFrame = []
 
   for (let i = ripples.length - 1; i >= 0; i--) {
     const ripple = ripples[i]
     const elapsedMs = now - ripple.startTime
+    if (elapsedMs < 0) {
+      // spawnRipple(delayMs)로 예약된, 아직 시작 안 한 파동 — 시작 시각까지는 그냥 다음
+      // 프레임을 계속 기다린다(바다 눌림 직후 파동이 뒤따르는 연출용).
+      needMore = true
+      continue
+    }
     const envelopeLinear = Math.max(0, 1 - elapsedMs / DURATION)
     const envelope = envelopeLinear * envelopeLinear // 제곱 감쇠 — 끝맺음이 부드럽다
 
@@ -681,7 +733,8 @@ function tick(now) {
   for (let i = presses.length - 1; i >= 0; i--) {
     const press = presses[i]
     const elapsedMs = now - press.startTime
-    const t = elapsedMs / PRESS_DURATION
+    const duration = press.isSea ? SEA_PRESS_DURATION : PRESS_DURATION
+    const t = elapsedMs / duration
 
     if (t >= 1) {
       presses.splice(i, 1)
@@ -690,30 +743,38 @@ function tick(now) {
 
     // 빠르게 강해졌다가(처음 15%) 서서히 풀리는(나머지 85%) 곡선 — 무거운 게 눌렀다 떼는 느낌.
     const envelope = t < 0.15 ? t / 0.15 : Math.pow(1 - (t - 0.15) / 0.85, 1.6)
+    const radius = press.isSea ? SEA_PRESS_RADIUS : PRESS_RADIUS
 
-    const minCol = Math.max(0, Math.floor(press.col - PRESS_RADIUS))
-    const maxCol = Math.min(cols.value - 1, Math.ceil(press.col + PRESS_RADIUS))
-    const minRow = Math.max(0, Math.floor(press.row - PRESS_RADIUS))
-    const maxRow = Math.min(rows.value - 1, Math.ceil(press.row + PRESS_RADIUS))
-    const radiusSq = PRESS_RADIUS * PRESS_RADIUS
+    const minCol = Math.max(0, Math.floor(press.col - radius))
+    const maxCol = Math.min(cols.value - 1, Math.ceil(press.col + radius))
+    const minRow = Math.max(0, Math.floor(press.row - radius))
+    const maxRow = Math.min(rows.value - 1, Math.ceil(press.row + radius))
+    const radiusSq = radius * radius
 
     for (let r = minRow; r <= maxRow; r++) {
       const rowBase = r * cols.value
       const dy2 = r - press.row
       for (let c = minCol; c <= maxCol; c++) {
         const idx = rowBase + c
-        if (!landMask[idx]) continue // 바다는 프레스 계산에서 제외
+        // 육지 프레스는 육지만, 바다 눌림은 바다만 — 서로 다른 버퍼(frameScratch/pressScratch)에
+        // 쌓이므로 육지·바다 필터도 각자 다르게 적용한다.
+        if (press.isSea ? landMask[idx] : !landMask[idx]) continue
 
         const dx2 = c - press.col
         const distSq = dx2 * dx2 + dy2 * dy2
         if (distSq > radiusSq) continue
 
         const distance = Math.sqrt(distSq)
-        const contribution = (1 - distance / PRESS_RADIUS) * envelope
+        const contribution = (1 - distance / radius) * envelope
         if (contribution <= 0.02) continue
 
-        if (frameScratch[idx] === 0) touchedThisFrame.push(idx)
-        if (contribution > frameScratch[idx]) frameScratch[idx] = contribution
+        if (press.isSea) {
+          if (pressScratch[idx] === 0) pressTouchedThisFrame.push(idx)
+          if (contribution > pressScratch[idx]) pressScratch[idx] = contribution
+        } else {
+          if (frameScratch[idx] === 0) touchedThisFrame.push(idx)
+          if (contribution > frameScratch[idx]) frameScratch[idx] = contribution
+        }
       }
     }
   }
@@ -769,6 +830,12 @@ function tick(now) {
     if (el) el.style.setProperty('--intensity', frameScratch[idx])
   }
   prevTouched = touchedThisFrame
+
+  for (const idx of pressTouchedThisFrame) {
+    const el = dotElements[idx]
+    if (el) el.style.setProperty('--press', pressScratch[idx])
+  }
+  prevPressTouched = pressTouchedThisFrame
 
   for (const idx of burstTouchedThisFrame) {
     const el = dotElements[idx]
@@ -882,8 +949,14 @@ function triggerCellEffect(col, row) {
   // 도시 도트는 클릭 시 별도로 burst(handleCityDotClick)가 뜨므로, 여기서 프레스까지 겹치면
   // 연출이 지저분해진다 — 도시 칸은 건너뛴다.
   if (dots.value[idx]?.city) return
-  if (landMask[idx]) spawnPress(col, row)
-  else spawnRipple(col, row)
+  if (landMask[idx]) {
+    spawnPress(col, row)
+  } else {
+    // 바다는 짧게 눌렸다가(빠져 들어감) 그 직후 파동이 퍼지는 2단 연출 — 무거운 것에
+    // 눌린 자리에서 물결이 퍼져나가는 느낌을 준다.
+    spawnPress(col, row, true)
+    spawnRipple(col, row, SEA_RIPPLE_DELAY)
+  }
   ensureTicking()
 }
 
@@ -1178,6 +1251,26 @@ defineExpose({
   toggleCompareMode,
 })
 
+// 도시 도트(마커색·펄스색·테두리색)와 후광 칸(HALO_*, buildGrid가 정적으로 계산해둔
+// dot.halo)의 인라인 스타일을 한 곳에서 만든다. 게임 중에는 날씨 표시 자체를 끈다(gameActive).
+function dotStyle(dot) {
+  if (props.gameActive) return undefined
+  if (dot.city) {
+    return {
+      background: markerColor(dot.city.condition),
+      '--pulse-color': pulseColor(dot.city),
+      '--marker-border-color': markerBorderColor(),
+    }
+  }
+  if (dot.halo) {
+    return {
+      '--halo-color': dot.halo.color,
+      '--halo': dot.halo.strength,
+    }
+  }
+  return undefined
+}
+
 // 날씨 도시·지명 픽셀 공용 호버 핸들러 — 툴팁 위치 계산 로직은 둘이 같고, 표시 내용만
 // 템플릿에서 dot.city/dot.landmark 여부로 갈린다.
 function handleDotHover(dot, event) {
@@ -1226,15 +1319,7 @@ function handleDotHover(dot, event) {
             [`is-condition-${dot.city?.condition}`]: !!dot.city && !gameActive,
             'is-landmark': dot.landmark && !gameActive,
           }"
-          :style="
-            dot.city && !gameActive
-              ? {
-                  background: markerColor(dot.city.condition),
-                  '--pulse-color': pulseColor(dot.city),
-                  '--marker-border-color': markerBorderColor(dot.city),
-                }
-              : undefined
-          "
+          :style="dotStyle(dot)"
           @pointerenter="(dot.city || dot.landmark) && !gameActive && handleDotHover(dot, $event)"
           @pointerleave="hoveredDot = null"
           @click="handleDotClick(dot, $event)"
@@ -1335,8 +1420,11 @@ function handleDotHover(dot, event) {
       color-mix(in srgb, var(--dot-lit) calc(var(--intensity, 0) * 100%), #7cc0cb)
     )
   );
-  transform: scale(calc(1 + var(--burst, 0) * 0.8));
-  filter: brightness(calc(1 + var(--burst, 0) * 1.2));
+  /* 눌림(--press)은 어두워지며 오그라들고, burst(선택 이펙트)는 반대로 밝아지며 부풀어
+     오른다 — 육지 프레스와 같은 방향의 합성이다(is-land 규칙 참고). 눌림 직후
+     spawnRipple(delayMs)로 파동이 뒤따라 --intensity가 background-color 쪽에서 밝게 섞인다. */
+  transform: scale(calc(1 - var(--press, 0) * 0.22 + var(--burst, 0) * 0.8));
+  filter: brightness(calc(1 - var(--press, 0) * 0.35 + var(--burst, 0) * 1.2));
   /* 자기 배경색보다 약 15% 어둡게 계산한 box-shadow로 칸 사이 격자 간격을 메워, 바다가
      빈틈없이 꽉 찬 하나의 면처럼 보이게 한다(육지의 영역 구분 기법과 같은 원리). 배경과
      완전히 같은 색이면 테두리가 안 보여서, 육지처럼 한 단계 진하게 뒀다. */
@@ -1344,11 +1432,21 @@ function handleDotHover(dot, event) {
 }
 
 .korea-map__dot.is-land {
-  /* 평소엔 그대로 육지색, burst가 있으면 --burst-color(기본 크림 화이트, 오답이면 빨간색)로 섞인다. */
+  /* 가장 안쪽 겹이 날씨 후광(--halo-color/--halo, buildGrid가 정적으로 계산해둔 값이라
+     매 프레임 비용이 없다) — 도시 주변 육지가 옅게 조건색을 띠어 "작은 기상 권역"처럼
+     보이게 한다. 그 위로 파동(--intensity)·burst·레이더가 기존과 같이 얹힌다. */
   background-color: color-mix(
     in srgb,
     #fff2b8 calc(var(--radar, 0) * 45%),
-    color-mix(in srgb, var(--burst-color, var(--dot-lit)) calc(var(--burst, 0) * 100%), var(--dot-lit))
+    color-mix(
+      in srgb,
+      var(--burst-color, var(--dot-lit)) calc(var(--burst, 0) * 100%),
+      color-mix(
+        in srgb,
+        var(--dot-lit) calc(var(--intensity, 0) * 100%),
+        color-mix(in srgb, var(--halo-color, var(--dot-lit)) calc(var(--halo, 0) * 100%), var(--dot-lit))
+      )
+    )
   );
   /* 프레스는 어두워지고 오그라들고, burst(선택 이펙트)는 반대로 밝아지며 부풀어 오른다 —
      둘 다 같은 도트에서 동시에 일어날 수 있어 한 식에서 합성한다. */
@@ -1393,18 +1491,13 @@ function handleDotHover(dot, event) {
 }
 
 /* 지명 픽셀 — 날씨 데이터가 없는 장식용 지역 표시. 날씨 도시(is-city)처럼 색을 칠하거나
-   팝업을 띄우지 않는다. 검은 테두리는 너무 튀어서, 육지색보다 살짝만 어둡게 낮은 불투명도의
-   테두리로 은은하게 구분되는 정도로만 표시한다. 클릭해도 아무 반응이 없으므로 커서도 손가락
-   모양으로 바꾸지 않는다. */
-.korea-map__dot.is-landmark {
-  box-shadow: 0 0 0 1px rgba(28, 27, 25, 0.28);
-}
-
+   팝업을 띄우지 않는다. 테두리는 일반 육지(.is-land)와 완전히 동일하게 둬서 다른 지형과
+   섞여 보이게 하고, 존재는 호버 확대로만 드러낸다. 클릭해도 아무 반응이 없으므로 커서도
+   손가락 모양으로 바꾸지 않는다. */
 .korea-map__dot.is-landmark:hover {
   position: relative;
   z-index: 3;
   transform: scale(1.3);
-  box-shadow: 0 0 0 1px rgba(28, 27, 25, 0.45);
 }
 
 /* 조건별 강조 링 — 호버했을 때만 재생되어 평소엔 리페인트 비용이 전혀 없다. */

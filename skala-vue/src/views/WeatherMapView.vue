@@ -280,11 +280,6 @@ const mascotCondition = computed(() => {
 // 한다. null이면(슬라이더를 만지지 않은 기본 상태) 지금까지처럼 항상 실제 현재 시각을 쓴다.
 const timeOverrideHour = ref(null)
 
-function hourFromUnix(unixSeconds) {
-  const d = new Date(unixSeconds * 1000)
-  return d.getHours() + d.getMinutes() / 60
-}
-
 const effectiveHour = computed(() => {
   if (timeOverrideHour.value != null) return timeOverrideHour.value
   const now = new Date()
@@ -313,49 +308,37 @@ const formattedEffectiveHour = computed(() => {
   return `${h}:${m}`
 })
 
-// 낮/밤 지도 톤 — 대표 도시(서울)의 일출/일몰과 (슬라이더로 바꾼) 시각을 비교해 밤이면
-// 지도 전체를 살짝 어둡게 낮춘다. 도시마다 일출·일몰이 조금씩 달라 정확히 "우리 동네 기준"은
-// 아니지만, 전국이 한 화면에 다 보이는 지도 특성상 대표 도시 하나로 근사해도 충분하다.
-const isNight = computed(() => {
-  const seoul = cityList.value.find((city) => city.id === 'city_01')
-  if (!seoul?.sunrise || !seoul?.sunset) return false
-  if (timeOverrideHour.value == null) {
-    const now = Date.now() / 1000
-    return now < seoul.sunrise || now > seoul.sunset
-  }
-  const sunriseHour = hourFromUnix(seoul.sunrise)
-  const sunsetHour = hourFromUnix(seoul.sunset)
-  return effectiveHour.value < sunriseHour || effectiveHour.value > sunsetHour
-})
-
-// 시각별 바다색 — 자정 짙은 남색 → 새벽 보랏빛 주황 → 한낮 기본 --sea 색 → 노을 주황 → 다시 밤
-// 순으로 선형 보간한다. 슬라이더를 안 만졌을 때도 실제 시각 기준으로 항상 계산되지만,
-// 낮 시간대(9~17시)는 기존 --sea 색과 동일해 평소엔 눈에 띄는 변화가 없다.
-const SEA_TONE_STOPS = [
-  { hour: 0, color: [43, 58, 85] },
-  { hour: 5, color: [43, 58, 85] },
-  { hour: 7, color: [201, 161, 92] },
-  { hour: 9, color: [92, 156, 168] },
-  { hour: 17, color: [92, 156, 168] },
-  { hour: 19, color: [217, 138, 74] },
-  { hour: 21, color: [43, 58, 85] },
-  { hour: 24, color: [43, 58, 85] },
+// 시각별 지도 틴트 — 배경(바다)색 자체를 바꾸는 대신, 지도 전체 위에 반투명 단색 레이어를
+// 한 장 덮어 "필터를 끼운" 것처럼 보이게 한다. 자정 짙은 남색 → 새벽 주황 → 한낮 투명(alpha 0,
+// 슬라이더를 안 만지면 지금과 시각적으로 동일) → 노을 주황 → 다시 밤 순으로 alpha·색을 함께
+// 보간한다. mix-blend-mode 대신 단순 alpha 레이어를 쓰는 이유: 아래에서 도트 수천 개가 계속
+// 애니메이션하는데, 블렌드 모드는 매 프레임 재합성 비용이 붙지만 alpha만 있는 레이어는 GPU
+// 합성 한 장으로 끝나고 색이 바뀔 때만 리페인트된다.
+const TINT_STOPS = [
+  { hour: 0, color: [30, 42, 70, 0.42] },
+  { hour: 5, color: [30, 42, 70, 0.42] },
+  { hour: 7, color: [214, 150, 80, 0.22] },
+  { hour: 9, color: [214, 150, 80, 0] },
+  { hour: 17, color: [214, 150, 80, 0] },
+  { hour: 19, color: [224, 126, 60, 0.26] },
+  { hour: 21, color: [30, 42, 70, 0.42] },
+  { hour: 24, color: [30, 42, 70, 0.42] },
 ]
 function lerpColor(a, b, t) {
-  return a.map((v, i) => Math.round(v + (b[i] - v) * t))
+  return a.map((v, i) => v + (b[i] - v) * t)
 }
-const seaTone = computed(() => {
+const timeTint = computed(() => {
   const hour = ((effectiveHour.value % 24) + 24) % 24
-  for (let i = 0; i < SEA_TONE_STOPS.length - 1; i++) {
-    const cur = SEA_TONE_STOPS[i]
-    const next = SEA_TONE_STOPS[i + 1]
+  for (let i = 0; i < TINT_STOPS.length - 1; i++) {
+    const cur = TINT_STOPS[i]
+    const next = TINT_STOPS[i + 1]
     if (hour >= cur.hour && hour <= next.hour) {
       const t = (hour - cur.hour) / (next.hour - cur.hour || 1)
-      const [r, g, b] = lerpColor(cur.color, next.color, t)
-      return `rgb(${r}, ${g}, ${b})`
+      const [r, g, b, a] = lerpColor(cur.color, next.color, t)
+      return `rgba(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)}, ${a.toFixed(2)})`
     }
   }
-  return 'rgb(92, 156, 168)'
+  return 'rgba(0, 0, 0, 0)'
 })
 
 // --- 지도 효과 토글: 레이더 스윕 · 두 도시 비교 ---
@@ -372,7 +355,7 @@ function toggleCompareMode() {
 </script>
 
 <template>
-  <div class="weather-map" :class="{ 'is-night': isNight }" :style="{ '--sea-tone': seaTone }">
+  <div class="weather-map">
     <p v-if="isLoading" class="status-message">날씨 정보를 불러오는 중...</p>
     <p v-else-if="loadError" class="status-message status-message--error">{{ loadError }}</p>
 
@@ -384,6 +367,9 @@ function toggleCompareMode() {
             @select-city="selectCity" @map-pick="handleMapPick"
             @compare-mode-change="handleCompareModeChange" />
         </div>
+        <!-- 시간대 슬라이더 틴트 — 지도 배경색 자체를 바꾸지 않고, 반투명 레이어를 필터처럼
+             덧씌운다(timeTint computed). pointer-events:none이라 지도 조작을 가리지 않는다. -->
+        <div class="weather-map__tint" :style="{ backgroundColor: timeTint }" />
 
         <!-- 정보창: 즐겨찾기 + 오늘의 순위 + 지도 효과 토글을 한 창에 통합. 넓은 화면에서는
              헤더를 잡고 끄는 드래그 창, ≤1000px에서는 하단 탭으로 여닫는 시트로 바뀐다(CSS). -->
@@ -400,14 +386,14 @@ function toggleCompareMode() {
                 <input v-model="radarEnabled" type="checkbox" />
                 레이더 스윕
               </label>
-              <button class="map-window__compare-btn" :class="{ 'is-active': isCompareMode }"
+              <button class="map-btn map-window__compare-btn" :class="{ 'is-active': isCompareMode }"
                 :disabled="game.status.value === 'playing'" @click="toggleCompareMode">
                 {{ isCompareMode ? '두 도시 비교 종료' : '두 도시 비교' }}
               </button>
               <div class="map-window__time">
                 <span class="map-window__time-label">시간대 {{ formattedEffectiveHour }}</span>
                 <input v-model.number="sliderHour" type="range" min="0" max="23.9" step="0.1" class="map-window__time-slider" />
-                <button v-if="timeOverrideHour !== null" class="map-window__time-reset" @click="resetTimeOverride">
+                <button v-if="timeOverrideHour !== null" class="map-btn map-window__time-reset" @click="resetTimeOverride">
                   현재 시각으로
                 </button>
               </div>
@@ -470,7 +456,7 @@ function toggleCompareMode() {
                 지도에서 문제로 나온 지역을 클릭해서 맞혀보세요! (10문제 30초)
               </p>
               <p class="game-window__best">최고 기록: {{ game.bestScore.value }}점</p>
-              <button class="game-window__start-btn" @pointerdown.stop @click="startGame">게임 시작</button>
+              <button class="map-btn game-window__start-btn" @pointerdown.stop @click="startGame">게임 시작</button>
             </template>
 
             <template v-else-if="game.status.value === 'playing'">
@@ -503,7 +489,7 @@ function toggleCompareMode() {
                   {{ index + 1 }}위 · {{ entry }}점
                 </li>
               </ol>
-              <button class="game-window__start-btn" @pointerdown.stop @click="startGame">다시 하기</button>
+              <button class="map-btn game-window__start-btn" @pointerdown.stop @click="startGame">다시 하기</button>
             </template>
           </div>
         </div>
@@ -564,20 +550,9 @@ function toggleCompareMode() {
   min-height: calc(100dvh - var(--nav-h, 57px));
   margin: 0;
   padding: 0;
-  /* --sea-tone은 시간대 슬라이더(seaTone computed)가 매번 계산해 내려주는 값 — 낮 시간대는
-     기존 --sea와 같은 색이라 슬라이더를 안 만지면 눈에 띄는 변화가 없다. */
-  background-color: var(--sea-tone, var(--sea));
+  background-color: var(--sea);
   animation: sea-shimmer 6s ease-in-out infinite;
   will-change: filter;
-  transition: background-color 0.4s ease;
-}
-
-/* 낮/밤 톤 — sea-shimmer가 이미 filter를 계속 애니메이션하고 있어(찰랑이는 효과), 별도
-   static filter를 얹으면 애니메이션에 가려 아무 효과가 없다. 그래서 밤에는 애니메이션
-   이름 자체를 더 어둡게 시작하는 변형(sea-shimmer-night)으로 바꿔치기한다 — 도트 색상
-   대비는 유지하면서 과하지 않게 살짝만 어둡게. */
-.weather-map.is-night {
-  animation-name: sea-shimmer-night;
 }
 
 .weather-map__body {
@@ -589,6 +564,17 @@ function toggleCompareMode() {
 .weather-map__grid-area {
   position: absolute;
   inset: 0;
+}
+
+/* 시간대 슬라이더 틴트 — 지도 위에 반투명 단색을 필터처럼 덧씌운다(timeTint computed).
+   지도 조작(줌·팬·클릭)을 가리지 않도록 pointer-events는 끄고, 정보창·게임창·팝업
+   (z-index 10 이상)보다는 아래에 있어야 한다. */
+.weather-map__tint {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  transition: background-color 0.2s linear;
 }
 
 /* 드래그 가능한 창의 공통 뼈대 — 정보창·게임창이 함께 쓴다. position:fixed로 둬서
@@ -658,27 +644,40 @@ function toggleCompareMode() {
   cursor: pointer;
 }
 
-.map-window__compare-btn {
-  width: 100%;
-  margin: 4px 0 10px;
+/* 지도 정보창·게임창의 버튼(두 도시 비교·현재 시각으로·게임 시작)이 모두 같은 톤을 쓰도록
+   둔 공통 클래스 — retro-theme.css의 .practice-section button과 같은 outline 톤(moss
+   테두리, hover 시 amber)에 픽셀 폰트를 맞췄다. 활성 상태(.is-active)만 amber로 채워
+   "켜짐"을 구분한다. 각 버튼 고유의 크기·여백은 아래 개별 클래스에서 덧붙인다. */
+.map-btn {
   border: 1px solid var(--moss);
   background: none;
   border-radius: 8px;
-  padding: 6px 8px;
+  padding: 6px 12px;
   font-family: var(--font-pixel-kr);
   font-size: 12px;
   color: var(--ink);
   cursor: pointer;
 }
 
-.map-window__compare-btn.is-active {
-  background: var(--amber);
+.map-btn:hover:not(:disabled) {
   border-color: var(--amber);
+  color: var(--amber);
 }
 
-.map-window__compare-btn:disabled {
+.map-btn.is-active {
+  background: var(--amber);
+  border-color: var(--amber);
+  color: var(--ink);
+}
+
+.map-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.map-window__compare-btn {
+  width: 100%;
+  margin: 4px 0 10px;
 }
 
 .map-window__time {
@@ -700,14 +699,9 @@ function toggleCompareMode() {
 
 .map-window__time-reset {
   align-self: flex-start;
-  border: none;
-  background: none;
-  padding: 0;
-  font-family: var(--font-mono);
+  padding: 4px 10px;
   font-size: 11px;
-  color: var(--amber);
-  text-decoration: underline;
-  cursor: pointer;
+  margin-top: 2px;
 }
 
 .map-window__subtitle {
@@ -844,14 +838,8 @@ function toggleCompareMode() {
 
 .game-window__start-btn {
   margin-top: 4px;
-  border: none;
-  border-radius: 10px;
-  background: var(--amber);
-  color: var(--ink);
-  font-family: var(--font-pixel-kr);
   font-size: 13px;
   padding: 10px 20px;
-  cursor: pointer;
 }
 
 .game-window__prompt {
@@ -996,18 +984,6 @@ function toggleCompareMode() {
 
   50% {
     filter: brightness(1.05) saturate(1.08);
-  }
-}
-
-@keyframes sea-shimmer-night {
-
-  0%,
-  100% {
-    filter: brightness(0.82) saturate(0.9);
-  }
-
-  50% {
-    filter: brightness(0.87) saturate(0.96);
   }
 }
 
