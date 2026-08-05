@@ -1802,6 +1802,54 @@
 
 ---
 
+## 25. 날씨 탭 개선(그리드·권역순 정렬·요약줄) + API 데이터 활용 기능 6종 구현
+
+**요구사항**
+- 이전 라운드에서 "제안만 하고 코드로 반영하지 않았던" 두 가지를 실제로 구현: (1) 날씨 탭 개선안(반응형 그리드, 권역별 정렬, 요약줄 범위 명확화), (2) API 데이터 활용 기능(풍향 아이콘, 기온 범위 바, 일교차 배지, 체감 온도차 문구, 즐겨찾기 비교표, 낮/밤 지도 톤) — 전부 AI 미사용, 규칙 기반.
+
+**사고 과정**
+- 구현을 시작하기 전 "반응형 그리드로 2~4열"이라는 예전 제안을 다시 확인하다가, 홈 화면을 감싸는 `BaseDashboardCard`(체크리스트 필수 산출물)가 `max-width: 420px`로 고정돼 있다는 걸 뒤늦게 발견했다. 이 폭 안에서는 사실상 2열이 한계라 원래 제안을 그대로 밀어붙이지 않고 스코프를 현실에 맞게 조정한 뒤 계획에 명시했다.
+- 실제로 그리드를 2열로 바꾸고 화면을 보니, `WeatherCard.vue`의 기존 가로 한 줄(아이콘+이름+온도+버튼) 레이아웃이 ~170px 폭에서 텍스트가 한 글자씩 줄바꿈되며 완전히 무너졌다. "카드는 그대로 두고 그리드만 바꾼다"는 최초 계획을 접고, 카드를 세로 2단(아이콘+이름 묶음 / 온도+버튼 묶음) 레이아웃으로 다시 짜고 긴 텍스트는 `text-overflow: ellipsis`로 잘라내는 방향으로 바꿨다 — 실제로 렌더링해보지 않았으면 놓쳤을 문제였다.
+- 권역별 정렬은 새 개념을 만들기보다 `CITY_LIST`에 `region` 필드를 하나 추가하고, `fetchCurrentWeather`/`getDummyWeather`가 이미 다른 필드들처럼 그대로 실어 보내는 기존 패턴을 그대로 따랐다.
+- 일교차 배지·체감 온도차 문구는 "10℃ 이상", "±3℃ 이상"처럼 자의적인 임계값이 필요했는데, 단위 전환(℃/℉)과 무관하게 항상 섭씨 원본 값으로 판정하도록 했다 — 화씨로 보고 있어도 "일교차가 크다"는 판정 자체는 바뀌면 안 되기 때문이다.
+- 낮/밤 지도 톤을 구현하려고 보니 `.weather-map`에 이미 `sea-shimmer` 애니메이션이 `filter`를 계속 움직이고 있어서, 밤 전용으로 별도의 정적 `filter` 규칙을 얹으면 애니메이션에 묻혀 아무 효과가 없었다. 정적 규칙 대신 더 어두운 값으로 시작하는 두 번째 키프레임(`sea-shimmer-night`)을 만들고 `.is-night` 클래스가 `animation-name`만 바꿔치기하도록 설계해 충돌을 피했다.
+- 즐겨찾기 비교표(도시/기온/습도/풍속)는 지도 정보창이 220px로 좁아 CSS 그리드 열 폭을 이름만 유동적(`1fr`)으로 두고 나머지는 숫자 폭에 맞춘 고정폭으로 좁혀 잘리지 않게 했다.
+
+**해결 과정**
+1. `src/services/weatherApi.js`: `CITY_LIST` 각 항목에 `region`(수도권/강원/충청/호남/영남/제주) 추가, `fetchCurrentWeather`·`getDummyWeather` 반환값에도 포함.
+2. `src/views/WeatherHomeView.vue`: 정렬 select에 "권역순" 옵션과 `REGION_ORDER` 기반 정렬 로직 추가, 요약줄에 "(평균·최고·최저는 검색과 무관하게 전체 도시 기준)" 문구 추가, `.city-list`를 `display:grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr))`로 전환.
+3. `src/components/practices/weather/WeatherCard.vue`: 좁은 그리드 폭에서 무너지던 가로 레이아웃을 세로 2단 + 말줄임 처리로 재작성.
+
+   #### `src/components/practices/weather/WeatherCard.vue`
+   ```css
+   .city-card { display: flex; flex-direction: column; gap: 10px; }
+   .city-card__name, .city-card__status {
+     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+   }
+   ```
+4. `src/components/practices/weather/WindDirectionIcon.vue`(신규): `PixelTempIcon.vue`와 같은 7x7 픽셀 격자 패턴으로 위쪽을 가리키는 화살표를 그리고 `windDeg`만큼 회전.
+5. `src/components/practices/weather/WeatherStatsPanel.vue`: 기존 `DotStatBar`를 재사용한 "기온 범위" 행, 풍향 아이콘+8방위 라벨, 일교차 배지(≥10℃), 체감 온도차 문구(±3℃) 추가.
+6. `src/views/WeatherMapView.vue`: 즐겨찾기 섹션을 이름+온도 버튼 목록에서 도시/기온/습도/풍속 4열 비교표로 확장, 대표 도시(서울) 일출·일몰 기준 `isNight` computed와 `is-night` 클래스, `sea-shimmer-night` 키프레임 추가.
+7. Chrome 확장으로 전부 확인: 2열 그리드가 카드 겹침 없이 정상 렌더링, `select.value='region'` 강제 후 수도권→강원→충청→호남 순으로 묶여 정렬됨, 상세 페이지에서 기온 범위 바·풍향 아이콘("동풍")·체감 문구("체감상 실제보다 더 덥게 느껴져요")가 모두 표시됨, `localStorage`에 즐겨찾기를 직접 심어 지도 정보창에서 도시/기온/습도/풍속 비교표가 정상 렌더링됨을 확인, `classList.add('is-night')`로 `animation-name`이 `sea-shimmer-night`로 정확히 바뀜을 `getComputedStyle`로 확인.
+
+**트러블슈팅**
+- 문제: "반응형 그리드 2~4열" 제안대로 그리드만 적용했더니 `WeatherCard.vue`의 가로 레이아웃이 좁은 열 폭에서 텍스트가 한 글자씩 세로로 줄바꿈되며 완전히 깨졌다.
+- 해결: 카드 내부 레이아웃을 세로 2단 구조로 다시 설계하고 긴 텍스트에 말줄임표를 적용해 어떤 폭에서도 안정적으로 보이게 했다.
+- 문제: 낮/밤 지도 톤을 위해 `.weather-map.is-night`에 정적 `filter`를 추가했는데, 기존 `sea-shimmer` 키프레임 애니메이션이 이미 `filter`를 매 프레임 덮어써서 전혀 반영되지 않았다.
+- 해결: 정적 규칙 대신 더 어두운 값의 두 번째 키프레임(`sea-shimmer-night`)을 만들고 `animation-name`만 클래스로 바꿔치기하는 방식으로 우회했다.
+- 문제: 즐겨찾기 표를 눈으로 확인하려는데 지도에서 마커를 정확히 클릭하기 어려웠다(줌/팬으로 위치가 계속 바뀜).
+- 해결: `localStorage`의 `weather-favorites` 키를 직접 조작해(`favoritesStore.js`의 영속화 키 확인 후) 즐겨찾기 상태를 즉시 만들어 확인했고, 확인 후 원상복구했다.
+
+**결과**
+- `npm run lint`(기존 무관 오류 1건 제외), `npx vite build` 통과.
+- Chrome 확장으로 그리드 레이아웃·권역순 정렬·요약줄 문구·풍향 아이콘·기온 범위 바·체감 온도차 문구·즐겨찾기 비교표·낮/밤 톤 전환 로직까지 전부 정상 동작 확인. 콘솔 에러 없음.
+
+**느낀점**
+- CSS 레이아웃 변경은 "이론상 되겠지"로 끝내지 말고 실제로 렌더링해서 눈으로 확인하는 게 얼마나 중요한지 다시 느꼈다 — 그리드로 바꾸는 것 자체는 한 줄짜리 변경이었지만, 그 여파로 카드 내부 레이아웃까지 다시 손봐야 했던 건 실제 화면을 보기 전까지는 전혀 예상하지 못했다.
+- CSS 애니메이션이 이미 어떤 속성을 계속 움직이고 있을 때, 그 속성에 정적 규칙을 얹어 "덮어쓰려는" 시도는 대부분 실패한다는 걸 다시 확인했다 — 애니메이션과 경쟁하는 대신 애니메이션 자체(키프레임/이름)를 교체하는 쪽이 항상 더 안전하다.
+
+---
+
 <!--
 아래 형식을 복사해서 작업 단위마다 항목을 추가합니다.
 

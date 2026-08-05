@@ -265,10 +265,20 @@ const mascotCondition = computed(() => {
   if (result.tier === 'near') return 'cloud'
   return 'rain'
 })
+
+// 낮/밤 지도 톤 — 대표 도시(서울)의 일출/일몰과 현재 시각을 비교해 밤이면 지도 전체를
+// 살짝 어둡게 낮춘다. 도시마다 일출·일몰이 조금씩 달라 정확히 "우리 동네 기준"은 아니지만,
+// 전국이 한 화면에 다 보이는 지도 특성상 대표 도시 하나로 근사해도 충분하다.
+const isNight = computed(() => {
+  const seoul = cityList.value.find((city) => city.id === 'city_01')
+  if (!seoul?.sunrise || !seoul?.sunset) return false
+  const now = Date.now() / 1000
+  return now < seoul.sunrise || now > seoul.sunset
+})
 </script>
 
 <template>
-  <div class="weather-map">
+  <div class="weather-map" :class="{ 'is-night': isNight }">
     <p v-if="isLoading" class="status-message">날씨 정보를 불러오는 중...</p>
     <p v-else-if="loadError" class="status-message status-message--error">{{ loadError }}</p>
 
@@ -289,13 +299,21 @@ const mascotCondition = computed(() => {
           <div class="map-window__body">
             <section class="map-window__section">
               <h3 class="map-window__section-title">즐겨찾기</h3>
-              <button v-for="city in favoriteCitiesWithWeather" :key="city.id" class="map-window__item"
-                @click="selectCityById(city)">
-                <DotMatrixIcon :condition="city.condition" size="sm" :animated="false" />
-                <span class="map-window__item-name">{{ city.name }}</span>
-                <span class="map-window__item-temp">{{ convertTemp(city.temp) }}{{ configStore.unitSymbol }}</span>
-              </button>
-              <p v-if="favoriteCitiesWithWeather.length === 0" class="map-window__empty">
+              <!-- 이름+온도만 보여주던 목록을, 온도·습도·풍속을 한눈에 비교할 수 있는 표로
+                   확장했다(창 폭이 220px로 좁아 헤더는 축약). -->
+              <div v-if="favoriteCitiesWithWeather.length > 0" class="fav-compare">
+                <div class="fav-compare__row fav-compare__row--head">
+                  <span>도시</span><span>기온</span><span>습도</span><span>풍속</span>
+                </div>
+                <button v-for="city in favoriteCitiesWithWeather" :key="city.id" class="fav-compare__row"
+                  @click="selectCityById(city)">
+                  <span class="fav-compare__name">{{ city.name }}</span>
+                  <span>{{ convertTemp(city.temp) }}{{ configStore.unitSymbol }}</span>
+                  <span>{{ city.humidity }}%</span>
+                  <span>{{ city.windSpeed }}m/s</span>
+                </button>
+              </div>
+              <p v-else class="map-window__empty">
                 즐겨찾기한 도시가 없어요
               </p>
             </section>
@@ -418,6 +436,14 @@ const mascotCondition = computed(() => {
   background-color: var(--sea);
   animation: sea-shimmer 6s ease-in-out infinite;
   will-change: filter;
+}
+
+/* 낮/밤 톤 — sea-shimmer가 이미 filter를 계속 애니메이션하고 있어(찰랑이는 효과), 별도
+   static filter를 얹으면 애니메이션에 가려 아무 효과가 없다. 그래서 밤에는 애니메이션
+   이름 자체를 더 어둡게 시작하는 변형(sea-shimmer-night)으로 바꿔치기한다 — 도트 색상
+   대비는 유지하면서 과하지 않게 살짝만 어둡게. */
+.weather-map.is-night {
+  animation-name: sea-shimmer-night;
 }
 
 .weather-map__body {
@@ -546,6 +572,46 @@ const mascotCondition = computed(() => {
   color: var(--moss);
 }
 
+/* 즐겨찾기 비교표 — 도시/기온/습도/풍속 4열. 이름 열만 넓게(1fr), 나머지는 숫자 폭에 맞춰
+   고정폭으로 좁게 둬 220px짜리 좁은 창 안에서도 잘리지 않게 한다. */
+.fav-compare {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.fav-compare__row {
+  display: grid;
+  grid-template-columns: 1fr 34px 34px 40px;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink);
+  text-align: right;
+  cursor: pointer;
+}
+
+.fav-compare__row:hover {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.fav-compare__row--head {
+  background: none;
+  color: var(--moss);
+  cursor: default;
+  padding: 0 8px;
+}
+
+.fav-compare__name {
+  font-family: var(--font-pixel-kr);
+  text-align: left;
+}
+
 /* 게임창 내부 — 아이콘/문구/게이지가 세로로 쌓이고 가운데 정렬된다. */
 .map-window__body--game {
   align-items: center;
@@ -661,6 +727,18 @@ const mascotCondition = computed(() => {
 
   50% {
     filter: brightness(1.05) saturate(1.08);
+  }
+}
+
+@keyframes sea-shimmer-night {
+
+  0%,
+  100% {
+    filter: brightness(0.82) saturate(0.9);
+  }
+
+  50% {
+    filter: brightness(0.87) saturate(0.96);
   }
 }
 

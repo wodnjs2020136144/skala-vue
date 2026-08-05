@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { useConfigStore } from '../../../stores/configStore'
 import DotMatrixIcon from './DotMatrixIcon.vue'
 import DotStatBar from './DotStatBar.vue'
+import WindDirectionIcon from './WindDirectionIcon.vue'
 
 const props = defineProps({
   city: {
@@ -28,6 +29,38 @@ const displayTempMin = computed(() => convertTemp(props.city.tempMin))
 const displayTempMax = computed(() => convertTemp(props.city.tempMax))
 
 const visibilityKm = computed(() => (props.city.visibility / 1000).toFixed(1))
+
+// 오늘 기온 범위(최저~최고) 안에서 현재 기온이 몇 % 지점인지 — DotStatBar를 그대로
+// 재사용해 막대로 보여준다. 최저·최고가 같으면(드묾) 가운데(50%)로 둔다.
+const tempRangePercent = computed(() => {
+  const { temp, tempMin, tempMax } = props.city
+  if (tempMax === tempMin) return 50
+  return Math.round(((temp - tempMin) / (tempMax - tempMin)) * 100)
+})
+
+// 풍향(windDeg, 0~360°)을 8방위 한글 라벨로 변환한다 — 지금까지 받아오기만 하고 화면
+// 어디에도 안 쓰이던 필드를 처음 활용하는 지점.
+const COMPASS_LABELS = ['북', '북동', '동', '남동', '남', '남서', '서', '북서']
+const windCompassLabel = computed(() => {
+  const index = Math.round((props.city.windDeg % 360) / 45) % 8
+  return COMPASS_LABELS[index]
+})
+
+// 일교차(최고-최저, 항상 섭씨 원본 기준 — 단위를 화씨로 바꿔도 "크다/작다" 판정 기준은
+// 그대로 10℃로 고정해야 의미가 일관된다)가 10℃ 이상이면 겉옷을 챙기라는 배지를 보여준다.
+const DIURNAL_RANGE_THRESHOLD = 10
+const hasWideDiurnalRange = computed(
+  () => props.city.tempMax - props.city.tempMin >= DIURNAL_RANGE_THRESHOLD,
+)
+
+// 체감온도와 실제 기온의 차이가 3℃ 이상 벌어지면 규칙 기반으로 안내 문구를 만든다.
+const FEELS_LIKE_DIFF_THRESHOLD = 3
+const feelsLikeNote = computed(() => {
+  const diff = props.city.feelsLike - props.city.temp
+  if (diff >= FEELS_LIKE_DIFF_THRESHOLD) return '체감상 실제보다 더 덥게 느껴져요'
+  if (diff <= -FEELS_LIKE_DIFF_THRESHOLD) return '체감상 실제보다 더 춥게 느껴져요'
+  return null
+})
 
 // 일출~일몰 사이 현재 시각의 진행률(%). 밤이면 0 또는 100으로 고정.
 const dayProgress = computed(() => {
@@ -77,11 +110,25 @@ function formatTime(unixSeconds) {
         :value="dayProgress"
         :display-value="`${formatTime(city.sunrise)} ~ ${formatTime(city.sunset)}`"
       />
+      <DotStatBar
+        label="기온 범위"
+        :value="tempRangePercent"
+        :display-value="`최저 ${displayTempMin}° ~ 최고 ${displayTempMax}°`"
+      />
     </div>
 
     <p class="weather-stats-panel__extra">
       체감 {{ displayFeelsLike }}{{ configStore.unitSymbol }} · 최저 {{ displayTempMin }}{{ configStore.unitSymbol }} · 최고
-      {{ displayTempMax }}{{ configStore.unitSymbol }} · 풍속 {{ city.windSpeed }}m/s
+      {{ displayTempMax }}{{ configStore.unitSymbol }}
+    </p>
+    <p class="weather-stats-panel__wind">
+      <WindDirectionIcon :degrees="city.windDeg" :size="10" />
+      풍속 {{ city.windSpeed }}m/s · {{ windCompassLabel }}풍
+    </p>
+
+    <p v-if="hasWideDiurnalRange || feelsLikeNote" class="weather-stats-panel__insight">
+      <span v-if="hasWideDiurnalRange" class="weather-stats-panel__badge">일교차 큼 · 겉옷 챙기세요</span>
+      <span v-if="feelsLikeNote">{{ feelsLikeNote }}</span>
     </p>
   </div>
 </template>
@@ -124,5 +171,36 @@ function formatTime(unixSeconds) {
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--moss);
+}
+
+.weather-stats-panel__wind {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--moss);
+}
+
+.weather-stats-panel__insight {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--moss);
+}
+
+.weather-stats-panel__badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(184, 68, 47, 0.15);
+  color: var(--danger, #b8442f);
+  font-size: 11px;
+  white-space: nowrap;
 }
 </style>

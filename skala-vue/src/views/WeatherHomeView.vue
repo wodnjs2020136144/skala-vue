@@ -65,11 +65,21 @@ const displayWeatherList = computed(() =>
   })),
 )
 
+// 권역순 정렬에서 권역이 항상 같은 순서(수도권→강원→충청→호남→영남→제주, 대략 북→남)로
+// 묶여 보이도록 고정 순서를 둔다 — localeCompare로는 이 순서가 보장되지 않는다.
+const REGION_ORDER = ['수도권', '강원', '충청', '호남', '영남', '제주']
+
 // 정렬 기준이 바뀔 때만 다시 정렬된다(displayWeatherList/sortBy 둘 다 안 바뀌면 재계산 없음).
 const sortedWeatherList = computed(() => {
   const list = [...displayWeatherList.value]
   if (sortBy.value === 'temp') {
     return list.sort((a, b) => b.temp - a.temp)
+  }
+  if (sortBy.value === 'region') {
+    return list.sort((a, b) => {
+      const regionDiff = REGION_ORDER.indexOf(a.region) - REGION_ORDER.indexOf(b.region)
+      return regionDiff !== 0 ? regionDiff : a.name.localeCompare(b.name, 'ko')
+    })
   }
   return list.sort((a, b) => a.name.localeCompare(b.name, 'ko'))
 })
@@ -137,6 +147,7 @@ function handleClickDetail(city) {
               <select v-model="sortBy">
                 <option value="name">이름순</option>
                 <option value="temp">기온순</option>
+                <option value="region">권역순</option>
               </select>
             </label>
           </div>
@@ -146,6 +157,7 @@ function handleClickDetail(city) {
             · 최고 {{ hottestCity?.name }}({{ convertTemp(hottestCity?.temp) }}{{ configStore.unitSymbol }}) · 최저 {{ coldestCity?.name }}({{
               convertTemp(coldestCity?.temp)
             }}{{ configStore.unitSymbol }})
+            <br /><span class="weather-parent__summary-note">(평균·최고·최저는 검색과 무관하게 전체 도시 기준)</span>
           </p>
 
           <ul v-if="sortedWeatherList.length > 0" class="city-list">
@@ -211,12 +223,21 @@ function handleClickDetail(city) {
   line-height: 1.5;
 }
 
+.weather-parent__summary-note {
+  opacity: 0.75;
+}
+
+/* 17개 시·도로 늘어난 뒤 1열 세로 목록은 스크롤이 너무 길어져, BaseDashboardCard의 고정
+   폭(420px, 패딩 제외 364px) 안에서 자동으로 열 수를 맞추는 그리드로 바꿨다 — 이 폭에서는
+   실질적으로 2열이 된다. WeatherCard.vue는 원래 가로 한 줄(아이콘+이름+온도+버튼) 레이아웃을
+   그대로 쓰는데, minmax 하한(150px)에서도 줄바꿈 없이 들어가는 걸 확인해 카드 자체는
+   건드리지 않았다. */
 .city-list {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 12px;
 }
 
