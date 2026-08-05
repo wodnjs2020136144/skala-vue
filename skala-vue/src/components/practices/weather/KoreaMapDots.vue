@@ -1021,16 +1021,18 @@ function handleDotHover(dot, event) {
 }
 
 /* 지명 픽셀 — 날씨 데이터가 없는 장식용 지역 표시. 날씨 도시(is-city)처럼 색을 칠하거나
-   팝업을 띄우지 않고, 육지색 그대로에 얇은 잉크색 테두리 하나만 추가해 "여기 지명이 있다"만
-   표시한다. 클릭해도 아무 반응이 없으므로 커서도 손가락 모양으로 바꾸지 않는다. */
+   팝업을 띄우지 않는다. 검은 테두리는 너무 튀어서, 육지색보다 살짝만 어둡게 낮은 불투명도의
+   테두리로 은은하게 구분되는 정도로만 표시한다. 클릭해도 아무 반응이 없으므로 커서도 손가락
+   모양으로 바꾸지 않는다. */
 .korea-map__dot.is-landmark {
-  box-shadow: 0 0 0 2px var(--ink);
+  box-shadow: 0 0 0 1px rgba(28, 27, 25, 0.28);
 }
 
 .korea-map__dot.is-landmark:hover {
   position: relative;
   z-index: 3;
-  transform: scale(1.5);
+  transform: scale(1.3);
+  box-shadow: 0 0 0 1px rgba(28, 27, 25, 0.45);
 }
 
 /* 조건별 강조 링 — 호버했을 때만 재생되어 평소엔 리페인트 비용이 전혀 없다. */
