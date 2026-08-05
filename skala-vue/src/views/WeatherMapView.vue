@@ -377,7 +377,9 @@ function toggleCompareMode() {
           :style="{ '--win-x': `${infoWindowDrag.position.value.x}px`, '--win-y': `${infoWindowDrag.position.value.y}px` }">
           <div class="map-window__header" @pointerdown="infoWindowDrag.startDrag">
             <FavoriteHeartDots :active="true" :size="14" />
-            <span>즐겨찾기 · 오늘의 순위</span>
+            <!-- 지도 효과(레이더·비교·시간대) 섹션이 추가되면서 "즐겨찾기 · 오늘의 순위"만으로는
+                 이 창의 내용을 다 아우르지 못해 더 통합적인 제목으로 바꿨다. -->
+            <span>지도 컨트롤</span>
           </div>
           <div class="map-window__body">
             <section class="map-window__section">
@@ -402,10 +404,12 @@ function toggleCompareMode() {
             <section class="map-window__section">
               <h3 class="map-window__section-title">즐겨찾기</h3>
               <!-- 이름+온도만 보여주던 목록을, 온도·습도·풍속을 한눈에 비교할 수 있는 표로
-                   확장했다(창 폭이 220px로 좁아 헤더는 축약). -->
+                   확장했다(창 폭이 220px로 좁아 헤더는 축약). 단위(%·m/s)를 헤더에 직접
+                   넣어봤지만 좁은 컬럼에서 CJK+영문 조합이 ellipsis에 통째로 잘려 아예 안
+                   보이는 문제가 있어, 헤더는 짧게 두고 단위는 표 아래 캡션 한 줄로 뺐다. -->
               <div v-if="favoriteCitiesWithWeather.length > 0" class="fav-compare">
                 <div class="fav-compare__row fav-compare__row--head">
-                  <span>도시</span><span>기온</span><span>습도(%)</span><span>풍속(m/s)</span>
+                  <span>도시</span><span>기온</span><span>습도</span><span>풍속</span>
                 </div>
                 <button v-for="city in favoriteCitiesWithWeather" :key="city.id" class="fav-compare__row"
                   @click="selectCityById(city)">
@@ -414,6 +418,7 @@ function toggleCompareMode() {
                   <span>{{ city.humidity }}</span>
                   <span>{{ city.windSpeed }}</span>
                 </button>
+                <p class="fav-compare__unit-note">단위: 습도 %, 풍속 m/s</p>
               </div>
               <p v-else class="map-window__empty">
                 즐겨찾기한 도시가 없어요
@@ -812,6 +817,15 @@ function toggleCompareMode() {
 .fav-compare__name {
   font-family: var(--font-pixel-kr);
   text-align: left;
+}
+
+/* 헤더 컬럼에 못 넣은 단위를 표 아래 한 줄로 안내 — weather-parent__summary-note와 같은 톤. */
+.fav-compare__unit-note {
+  margin: 4px 0 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--moss);
+  opacity: 0.75;
 }
 
 /* 게임창 내부 — 아이콘/문구/게이지가 세로로 쌓이고 가운데 정렬된다. */

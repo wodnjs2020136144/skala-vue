@@ -494,9 +494,14 @@ function clampPan() {
 function applyTransform() {
   if (!viewportRef.value) return
   viewportRef.value.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`
-  // transform(줌/팬)이 바뀔 때만 rect를 다시 읽는다 — mousemove마다 매번 읽던 것보다
-  // 훨씬 드물게 호출된다(휠 조작 시, 그리고 커서 추종 팬이 lerp로 정착하는 동안의 매 프레임).
-  refreshRects()
+  // tick()이 rAF가 살아있는 한 매 프레임 이 함수를 부르는데, 예전엔 여기서 매번
+  // refreshRects()(getBoundingClientRect 2회)를 강제로 다시 읽어 "스타일 쓰기 → 같은
+  // 프레임에 레이아웃 읽기" 조합이 매 프레임 동기 리플로우를 유발했다 — 도트가 수천 개인
+  // 그리드에서 줌 애니메이션(특히 게임 시작 시 zoomToKorea) 내내 반복돼 렉의 주 원인이었다.
+  // 이제는 캐시를 무효화만 해두고, 실제로 좌표 변환이 필요한 시점(포인터 인터랙션)에
+  // handlePointerDown/Move가 이미 갖고 있는 "캐시가 없을 때만 refresh" 가드로 지연 계산한다.
+  cachedRootRect = null
+  cachedGridRect = null
 }
 
 // root/grid의 bounding rect를 캐시해둔다. mousemove는 이 캐시만 읽어서, 화면이 정지해
@@ -1365,14 +1370,18 @@ function handleDotHover(dot, event) {
 
     <div v-if="hoveredDot?.city || hoveredDot?.landmark" class="korea-map__bubble"
       :style="{ left: `${tooltipPos.left}px`, top: `${tooltipPos.top}px`, '--tail-offset': `${tooltipPos.tailOffset}px` }">
-      {{ hoveredDot.city?.name ?? hoveredDot.landmark?.name }}
-      {{ hoveredDot.city ? (CONDITION_LABELS_KR[hoveredDot.city.condition] ?? '') : '' }}
+      <div class="korea-map__bubble-body">
+        {{ hoveredDot.city?.name ?? hoveredDot.landmark?.name }}
+        {{ hoveredDot.city ? (CONDITION_LABELS_KR[hoveredDot.city.condition] ?? '') : '' }}
+      </div>
     </div>
 
     <div v-if="comparePopup" class="korea-map__bubble korea-map__bubble--compare"
       :style="{ left: `${comparePopup.left}px`, top: `${comparePopup.top}px` }">
-      {{ comparePopup.cityAName }} ↔ {{ comparePopup.cityBName }}<br />
-      온도차 {{ comparePopup.tempDiff }}° · 습도차 {{ comparePopup.humidityDiff }}%p · {{ comparePopup.cellDistance }}칸
+      <div class="korea-map__bubble-body">
+        {{ comparePopup.cityAName }} ↔ {{ comparePopup.cityBName }}<br />
+        온도차 {{ comparePopup.tempDiff }}° · 습도차 {{ comparePopup.humidityDiff }}%p · {{ comparePopup.cellDistance }}칸
+      </div>
     </div>
   </div>
 </template>
@@ -1416,8 +1425,7 @@ function handleDotHover(dot, event) {
   }
 }
 
-.korea-map__bubble--compare {
-  transform: translate(-50%, calc(-100% - 12px));
+.korea-map__bubble--compare .korea-map__bubble-body {
   text-align: center;
   line-height: 1.6;
 }
@@ -1714,10 +1722,21 @@ function handleDotHover(dot, event) {
   }
 }
 
-/* 픽셀 말풍선 — 줌 뷰포트 바깥(korea-map 직계)에 둬서 배율과 무관하게 크기가 고정된다. */
+/* 픽셀 말풍선 — 줌 뷰포트 바깥(korea-map 직계)에 둬서 배율과 무관하게 크기가 고정된다.
+   위치·꼬리(::before/::after)는 이 바깥 엘리먼트가 맡고, clip-path로 잘린 모서리를 만드는
+   시각적 "몸통"은 안쪽 -body 래퍼로 분리했다 — clip-path는 그 엘리먼트의 서브트리 전체
+   (가상요소 포함)에 적용되는데, 꼬리는 몸통 박스 바깥(bottom: -9px)에 그려지는 부분이라
+   같은 엘리먼트에 clip-path와 꼬리를 함께 두면 꼬리가 clip-path의 폴리곤 범위(0~100%,
+   즉 몸통 높이까지) 밖이라 통째로 잘려 전혀 보이지 않았다. */
 .korea-map__bubble {
   position: absolute;
+  width: max-content;
   transform: translate(-50%, calc(-100% - 12px));
+  pointer-events: none;
+  z-index: 10;
+}
+
+.korea-map__bubble-body {
   background: var(--paper);
   border: 3px solid var(--ink);
   padding: 6px 10px 8px;
@@ -1725,8 +1744,6 @@ function handleDotHover(dot, event) {
   font-size: 12px;
   color: var(--ink);
   white-space: nowrap;
-  pointer-events: none;
-  z-index: 10;
   clip-path: polygon(4px 0, calc(100% - 4px) 0, 100% 4px, 100% 100%, 4px 100%, 0 calc(100% - 4px), 0 4px);
 }
 
