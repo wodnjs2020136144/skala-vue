@@ -34,7 +34,7 @@ async function loadCities() {
   loadError.value = ''
   try {
     cityList.value = demoStore.useDummyData
-      ? CITY_LIST.map((city, index) => getDummyWeather(city, index))
+      ? CITY_LIST.map((city) => getDummyWeather(city))
       : await Promise.all(CITY_LIST.map((city) => fetchCurrentWeather(city)))
   } catch (err) {
     loadError.value = '날씨 정보를 불러오지 못했습니다. API Key와 네트워크 상태를 확인해 주세요.'

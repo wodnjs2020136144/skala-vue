@@ -1972,6 +1972,59 @@
 
 ---
 
+## 28. 도시 순서를 권역순으로 재정렬 + 데모 날씨 조건을 도시 id 기반으로 고정
+
+**요구사항**
+- 모바일/태블릿 반응형 대응, 도시 순서 점검, 날씨 탭 요약 정리, 지도 탭 인터랙티브 기능 추가, 실습 모음·스터디 가이드 디자인 검토라는 5가지 큰 작업 중 첫 번째로, `CITY_LIST`의 배열 순서가 의미 있게 정렬돼 있는지 확인하고 필요하면 정리한다.
+
+**사고 과정**
+- 조사해보니 `CITY_LIST`는 가나다순도 인구순도 아닌 "작성 이력순"(초기 9개 + 나중에 17개로 확장하며 덧붙인 8개)이었다. 그런데 데모 데이터 생성 함수 `getDummyWeather(city, index)`가 `DUMMY_CONDITIONS[index % 6]`으로 **배열 인덱스에 날씨 조건을 묶어두고 있어서**, 배열 순서를 그냥 바꾸면 도시별 데모 날씨(예: "부산=비")가 전부 재배치되는 부작용이 있었다.
+- 그래서 순서를 바꾸기 전에 먼저 조건 배정을 배열 위치가 아니라 `city.id`(예: `city_03`)에서 뽑은 고정 숫자로 옮겨, 앞으로 배열 순서를 어떻게 바꾸든 도시별 데모 조건이 안정적으로 유지되게 했다.
+- 정렬 기준은 홈 화면 "권역순" 정렬에 이미 쓰이는 순서(수도권→강원→충청→호남→영남→제주)를 그대로 채택해, 배열 자체도 그 순서(+ 권역 내 가나다순)로 맞췄다. `id`는 즐겨찾기 localStorage와 `?city=` 딥링크가 저장하고 있어 재부여하지 않고 그대로 뒀다.
+
+**해결 과정**
+1. `getDummyWeather`가 인덱스 대신 `city.id`에서 숫자를 뽑아 조건을 정하도록 바꾸고, 시그니처를 `getDummyWeather(city)`로 단순화했다.
+
+#### 파일 경로: `src/services/weatherApi.js`
+```js
+export function getDummyWeather(city) {
+  // 조건 배정을 CITY_LIST 배열 위치가 아니라 도시 고유 id(city_01 등)에 묶어둔다.
+  // 배열 순서를 나중에 다시 바꾸더라도(정렬 기준 변경 등) 도시별 데모 날씨가 그대로 유지된다.
+  const cityNumber = Number(city.id.slice('city_'.length))
+  const condition = DUMMY_CONDITIONS[cityNumber % DUMMY_CONDITIONS.length]
+  const temp = DUMMY_TEMP_BY_CONDITION[condition]
+  ...
+}
+```
+
+2. `CITY_LIST` 배열을 권역순 + 권역 내 가나다순으로 재정렬했다(`id`는 유지, 배열 위치만 이동).
+
+#### 파일 경로: `src/services/weatherApi.js`
+```js
+export const CITY_LIST = [
+  { id: 'city_01', name: '서울', ... region: '수도권', ... },
+  { id: 'city_02', name: '수원', ... region: '수도권', ... },
+  { id: 'city_04', name: '인천', ... region: '수도권', ... },
+  { id: 'city_10', name: '춘천', ... region: '강원', ... },
+  { id: 'city_05', name: '대전', ... region: '충청', ... },
+  // ... 세종·청주·홍성(충청) → 광주·목포·전주(호남) → 대구·부산·안동·울산·창원(영남) → 제주
+]
+```
+
+3. 호출부 3곳(`WeatherHomeView.vue`, `WeatherMapView.vue`, `WeatherDetailView.vue`)에서 `getDummyWeather(city, index)` 호출을 `getDummyWeather(city)`로 정리했다. 특히 `WeatherDetailView.vue`는 기존에 `CITY_LIST.findIndex(...)`로 인덱스를 우회해서 구했었는데, 이제 필요 없어져 해당 로직과 미사용 `CITY_LIST` import를 함께 제거했다.
+
+**트러블슈팅**
+- 없음.
+
+**결과**
+- `npm run lint`(기존 무관 오류 1건 제외)·`npx vite build` 통과.
+- Chrome 확장으로 확인: 홈 화면을 "권역순"으로 정렬하면 서울→수원→인천→춘천→대전→세종→청주→홍성→광주→목포→전주→대구→부산→안동→울산→창원→제주 순으로 정확히 나열됨. 부산의 데모 날씨 상태("눈 (데모)", -2℃)가 홈 카드·상세 페이지·지도 팝업 세 곳에서 모두 일치함을 확인. 콘솔 에러 없음.
+
+**느낀점**
+- "배열 순서"라는 게 화면에 보이는 나열 순서일 뿐 아니라, 다른 곳에서 `index % N` 같은 방식으로 몰래 의미를 부여받고 있을 수 있다는 걸 다시 확인했다. 정렬을 바꾸는 작업이라도 그 배열을 참조하는 다른 코드를 먼저 훑어보지 않으면 예상 못 한 부작용이 생긴다.
+
+---
+
 <!--
 아래 형식을 복사해서 작업 단위마다 항목을 추가합니다.
 

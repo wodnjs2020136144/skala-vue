@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import { ElSkeleton } from 'element-plus'
 import { useConfigStore } from '../stores/configStore'
 import { useDemoStore } from '../stores/demoStore'
-import { CITY_LIST, findCityById, fetchCurrentWeather, getDummyWeather } from '../services/weatherApi'
+import { findCityById, fetchCurrentWeather, getDummyWeather } from '../services/weatherApi'
 import WeatherStatsPanel from '../components/practices/weather/WeatherStatsPanel.vue'
 import UnitToggler from '../components/UnitToggler.vue'
 
@@ -35,12 +35,10 @@ async function loadDetail() {
   loadError.value = ''
   try {
     // 홈/지도 화면과 같은 분기 — 이게 빠져 있어서 "데모 데이터 보기"를 켜도 상세 페이지만
-    // 항상 실제 API 값을 보여주던 버그였다. index는 CITY_LIST 안에서의 실제 순서를 그대로
-    // 써서, 홈 카드에서 보던 것과 같은 도시가 데모 모드에서도 같은 조건(예: "맑음 (데모)")을
-    // 보이게 맞춘다.
+    // 항상 실제 API 값을 보여주던 버그였다. getDummyWeather는 도시 id로 조건을 정하므로
+    // 홈 카드에서 보던 것과 같은 도시가 데모 모드에서도 같은 조건(예: "맑음 (데모)")을 보인다.
     if (demoStore.useDummyData) {
-      const index = CITY_LIST.findIndex((c) => c.id === city.id)
-      weather.value = getDummyWeather(city, index)
+      weather.value = getDummyWeather(city)
     } else {
       weather.value = await fetchCurrentWeather(city)
     }

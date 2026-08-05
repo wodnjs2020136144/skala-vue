@@ -13,24 +13,28 @@ const BASE_URL = 'https://api.openweathermap.org/data/2.5/weather'
 // (그쪽 목록에서는 제거해 미니게임에 같은 지역이 중복으로 나오지 않게 했다), city_17(홍성)만
 // 새로 좌표를 찾았다.
 // region은 홈 화면 "권역순" 정렬에 쓰는 고정 태그(수도권/강원/충청/호남/영남/제주 6개)다.
+// 배열 순서 자체도 이 권역 순서(+ 권역 내 가나다순)로 맞춰뒀다 — 즐겨찾기 칩(App.vue)처럼
+// 이 배열을 그대로 나열하는 화면도 있어서다. id는 각 도시에 최초 부여된 값을 그대로 두고
+// (즐겨찾기 localStorage·?city= 딥링크가 id를 저장하므로 재부여하면 기존 값이 깨진다)
+// 배열 위치만 재정렬했다.
 export const CITY_LIST = [
   { id: 'city_01', name: '서울', query: 'Seoul,KR', region: '수도권', mapX: 0.432, mapY: 0.598 },
   { id: 'city_02', name: '수원', query: 'Suwon,KR', region: '수도권', mapX: 0.432, mapY: 0.634 },
-  { id: 'city_03', name: '부산', query: 'Busan,KR', region: '영남', mapX: 0.659, mapY: 0.817 },
   { id: 'city_04', name: '인천', query: 'Incheon,KR', region: '수도권', mapX: 0.364, mapY: 0.598 },
-  { id: 'city_05', name: '대전', query: 'Daejeon,KR', region: '충청', mapX: 0.477, mapY: 0.695 },
-  { id: 'city_06', name: '대구', query: 'Daegu,KR', region: '영남', mapX: 0.614, mapY: 0.744 },
-  { id: 'city_07', name: '광주', query: 'Gwangju,KR', region: '호남', mapX: 0.341, mapY: 0.805 },
-  { id: 'city_08', name: '울산', query: 'Ulsan,KR', region: '영남', mapX: 0.705, mapY: 0.78 },
-  { id: 'city_09', name: '제주', query: 'Jeju,KR', region: '제주', mapX: 0.295, mapY: 0.963 },
   { id: 'city_10', name: '춘천', query: 'Chuncheon,KR', region: '강원', mapX: 0.568, mapY: 0.524 },
-  { id: 'city_11', name: '청주', query: 'Cheongju,KR', region: '충청', mapX: 0.523, mapY: 0.671 },
-  { id: 'city_12', name: '전주', query: 'Jeonju,KR', region: '호남', mapX: 0.432, mapY: 0.744 },
-  { id: 'city_13', name: '목포', query: 'Mokpo,KR', region: '호남', mapX: 0.25, mapY: 0.841 },
-  { id: 'city_14', name: '안동', query: 'Andong,KR', region: '영남', mapX: 0.659, mapY: 0.695 },
-  { id: 'city_15', name: '창원', query: 'Changwon,KR', region: '영남', mapX: 0.568, mapY: 0.793 },
+  { id: 'city_05', name: '대전', query: 'Daejeon,KR', region: '충청', mapX: 0.477, mapY: 0.695 },
   { id: 'city_16', name: '세종', query: 'Sejong,KR', region: '충청', mapX: 0.432, mapY: 0.695 },
+  { id: 'city_11', name: '청주', query: 'Cheongju,KR', region: '충청', mapX: 0.523, mapY: 0.671 },
   { id: 'city_17', name: '홍성', query: 'Hongseong,KR', region: '충청', mapX: 0.29, mapY: 0.745 },
+  { id: 'city_07', name: '광주', query: 'Gwangju,KR', region: '호남', mapX: 0.341, mapY: 0.805 },
+  { id: 'city_13', name: '목포', query: 'Mokpo,KR', region: '호남', mapX: 0.25, mapY: 0.841 },
+  { id: 'city_12', name: '전주', query: 'Jeonju,KR', region: '호남', mapX: 0.432, mapY: 0.744 },
+  { id: 'city_06', name: '대구', query: 'Daegu,KR', region: '영남', mapX: 0.614, mapY: 0.744 },
+  { id: 'city_03', name: '부산', query: 'Busan,KR', region: '영남', mapX: 0.659, mapY: 0.817 },
+  { id: 'city_14', name: '안동', query: 'Andong,KR', region: '영남', mapX: 0.659, mapY: 0.695 },
+  { id: 'city_08', name: '울산', query: 'Ulsan,KR', region: '영남', mapX: 0.705, mapY: 0.78 },
+  { id: 'city_15', name: '창원', query: 'Changwon,KR', region: '영남', mapX: 0.568, mapY: 0.793 },
+  { id: 'city_09', name: '제주', query: 'Jeju,KR', region: '제주', mapX: 0.295, mapY: 0.963 },
 ]
 
 export function findCityById(id) {
@@ -56,7 +60,7 @@ export function mapWeatherMainToCondition(weatherMain) {
 
 // OpenWeatherMap 현재 날씨 API를 호출해, 화면에서 쓰기 좋은 형태로 가공해 반환한다.
 // 온도는 항상 섭씨(metric)로 받아오고, 화씨 표시는 각 화면의 computed에서 변환한다.
-// 6가지 날씨 조건을 도시 순서대로 돌아가며 배정하는 더미 데이터.
+// 6가지 날씨 조건을 도시별로 돌아가며 배정하는 더미 데이터.
 // API 응답 없이 즉시 만들어지므로, 실제 날씨와 상관없이 모든 아이콘/애니메이션을 바로 볼 수 있다.
 const DUMMY_CONDITIONS = ['sun', 'cloud', 'rain', 'snow', 'thunderstorm', 'fog']
 const DUMMY_STATUS_TEXT = {
@@ -76,8 +80,11 @@ const DUMMY_TEMP_BY_CONDITION = {
   fog: 15,
 }
 
-export function getDummyWeather(city, index) {
-  const condition = DUMMY_CONDITIONS[index % DUMMY_CONDITIONS.length]
+export function getDummyWeather(city) {
+  // 조건 배정을 CITY_LIST 배열 위치가 아니라 도시 고유 id(city_01 등)에 묶어둔다.
+  // 배열 순서를 나중에 다시 바꾸더라도(정렬 기준 변경 등) 도시별 데모 날씨가 그대로 유지된다.
+  const cityNumber = Number(city.id.slice('city_'.length))
+  const condition = DUMMY_CONDITIONS[cityNumber % DUMMY_CONDITIONS.length]
   const temp = DUMMY_TEMP_BY_CONDITION[condition]
   const now = Math.floor(Date.now() / 1000)
 
