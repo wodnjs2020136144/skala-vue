@@ -1135,20 +1135,26 @@ function handleDotHover(dot, event) {
   }
 }
 
-/* 콤보 이펙트 — 연속 정답 시 한반도 육지 전체가 한 번 밝게 빛난다. */
+/* 콤보 이펙트 — 연속 정답 시 한반도 육지 전체가 한 번 밝게 빛난다. 육지 도트가 수백 개라
+   `filter`처럼 리페인트를 요구하는 속성을 동시에 애니메이션하면 게임 중 렉의 주된 원인이
+   됐다 — `opacity`는 `transform`과 함께 브라우저가 합성(compositor) 단계만으로 처리할 수
+   있는 몇 안 되는 속성이라 같은 개수의 도트에 걸어도 훨씬 가볍다. `transform`을 쓰지 않는
+   이유: is-land 기본 규칙이 이미 --intensity/--burst로 transform: scale(...)을 계산해
+   쓰고 있어(파동·프레스·burst용), 여기서 또 transform을 애니메이션하면 정답 클릭 시 함께
+   뜨는 burst 이펙트와 짧게 충돌할 수 있다. */
 .korea-map.is-combo-flashing .korea-map__dot.is-land {
   animation: korea-combo-flash 0.6s ease-out;
 }
 
 @keyframes korea-combo-flash {
   0% {
-    filter: brightness(1);
+    opacity: 1;
   }
   35% {
-    filter: brightness(2);
+    opacity: 0.55;
   }
   100% {
-    filter: brightness(1);
+    opacity: 1;
   }
 }
 

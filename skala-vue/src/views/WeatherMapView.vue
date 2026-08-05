@@ -201,8 +201,10 @@ function startGame() {
 // 게임이 진행 중일 때만 지도가 클릭을 map-pick으로 보낸다(KoreaMapDots의 gameActive prop).
 // 정답 위치에는 항상(기존 크림색 burst), 완전 오답이면 클릭한 위치에도 빨간 burst를 추가로
 // 띄워 "여기가 틀렸다"를 바로 알 수 있게 한다 — 근접(near)은 감점도 없고 다른 지역과
-// 겹쳤을 뿐이므로 빨간 burst 없이 정답과 같은 크림색 burst만 준다. 콤보가 2 이상으로
-// 이어지면(연속 정답) 한반도 전체가 한 번 빛나는 이펙트를 함께 띄운다.
+// 겹쳤을 뿐이므로 빨간 burst 없이 정답과 같은 크림색 burst만 준다. 콤보가 2 이상이고
+// 짝수일 때만(2·4·6...) 한반도 전체가 한 번 빛나는 이펙트를 띄운다 — 매번 띄우면(연속
+// 정답마다) 한반도 육지 도트 수백 개에 동시에 애니메이션이 걸려 게임 중 렉의 주된 원인이
+// 됐었다. 발동 빈도를 절반으로 줄여 반짝이는 손맛은 남기되 빈도 자체를 낮춘다.
 function handleMapPick({ col, row }) {
   const result = game.submitGuess(
     col,
@@ -213,7 +215,7 @@ function handleMapPick({ col, row }) {
   if (!result) return
   mapDotsRef.value?.spawnBurst(result.answer.col, result.answer.row, 'correct')
   if (result.tier === 'correct') {
-    if (game.combo.value >= 2) mapDotsRef.value?.flashKorea()
+    if (game.combo.value >= 2 && game.combo.value % 2 === 0) mapDotsRef.value?.flashKorea()
   } else if (result.tier === 'wrong') {
     mapDotsRef.value?.spawnBurst(result.clicked.col, result.clicked.row, 'wrong')
   }

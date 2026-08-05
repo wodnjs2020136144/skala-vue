@@ -102,7 +102,21 @@ export function getDummyWeather(city, index) {
   }
 }
 
+// 짧은 시간 안에 같은 도시를 반복 요청하지 않도록 하는 인메모리 캐시. 무료 API 요금제가
+// 분당 60회로 제한돼 있는데(게다가 정적 사이트라 API 키가 빌드 결과물에 그대로 노출돼
+// 있어, 접속이 몰리면 이 한도를 다 함께 나눠 쓴다), 홈↔지도 이동·새로고침·데모 토글처럼
+// 같은 도시를 짧은 간격으로 다시 요청하는 흔한 시나리오를 캐시로 걸러낸다. 날씨는 10분
+// 안에 크게 바뀌는 경우가 드물어 화면 신선도를 크게 해치지 않는다. 새로고침 간에는 유지할
+// 필요가 없어(새로 열면 최신 데이터를 받는 게 낫다) localStorage가 아닌 모듈 스코프 Map만 쓴다.
+const CACHE_TTL_MS = 10 * 60 * 1000 // 10분
+const weatherCache = new Map() // city.query -> { data, fetchedAt }
+
 export async function fetchCurrentWeather(city) {
+  const cached = weatherCache.get(city.query)
+  if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
+    return cached.data
+  }
+
   const { data } = await axios.get(BASE_URL, {
     params: {
       q: city.query,
@@ -115,7 +129,7 @@ export async function fetchCurrentWeather(city) {
   const { main, weather, wind, visibility, clouds, sys } = data
   const [{ main: weatherMain, description } = {}] = weather ?? []
 
-  return {
+  const result = {
     id: city.id,
     name: city.name,
     mapX: city.mapX,
@@ -135,4 +149,7 @@ export async function fetchCurrentWeather(city) {
     sunrise: sys?.sunrise,
     sunset: sys?.sunset,
   }
+
+  weatherCache.set(city.query, { data: result, fetchedAt: Date.now() })
+  return result
 }

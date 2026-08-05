@@ -1744,6 +1744,64 @@
 
 ---
 
+## 24. API 요청 캐싱 도입 + 게임 콤보 플래시 렉 원인 분석·개선
+
+**요구사항**
+- 지명 픽셀(29곳)까지 전부 실제 날씨 도시로 만들 수 있는지, 무료 API 분당 60회 제한을 우회할 방법이 있는지 확인.
+- 게임 진행 중 렉이 심한 이유를 분석하고 개선 방안 제시.
+
+**사고 과정**
+- 지역 확장 건은 애초에 "여러 도시를 한 번에 묶어 조회하는 group 엔드포인트로 요청 수를 3번까지 줄인다"는 구상을 갖고 있었는데, 웹 검색으로 확인해보니 OpenWeatherMap이 이 엔드포인트를 2025년 8월경 공식적으로 폐지한 상태였다. 확인 없이 진행했으면 실제로 동작하지 않는 걸 구현할 뻔했다 — 사실관계를 먼저 검증한 게 옳은 순서였다.
+- 대안이 사라진 상태에서 46개 전부를 날씨 도시로 만들면 도시 수만큼 개별 요청이 그대로 필요하고, 이 프로젝트가 정적 사이트(GitHub Pages)라 API 키가 빌드 결과물에 그대로 노출돼 있어 여러 방문자가 같은 키·같은 분당 60회 한도를 나눠 쓴다는 구조적 리스크까지 겹친다는 걸 확인했다. 이 조건에서 46개로 무작정 늘리는 건 안전하지 않다고 판단해 사용자에게 확장 범위 선택지를 제시했고, "17개 유지 + 캐싱만 추가"로 결정했다.
+- 게임 렉은 짐작이 아니라 코드로 원인을 짚었다 — `WeatherMapView.vue`의 콤보 플래시 트리거(`combo.value >= 2`)가 2연속 정답부터 매번 발동하고, `flashKorea()`가 한반도 육지 도트 약 369개 전체에 동시에 `filter: brightness()` 키프레임 애니메이션을 건다는 걸 확인했다. `filter`는 `transform`/`opacity`와 달리 브라우저가 합성 단계만으로 처리하지 못해 리페인트가 필요한 속성이라, 수백 개 요소에서 동시에 애니메이션하면 비용이 크다 — 이번 세션에서 추가한 게임 중 확대(최대 2.4배)까지 겹쳐 체감 렉이 심해진 것으로 결론 내렸다. 게임 종료 흔들림(`shakeKorea`)은 같은 개수의 도트를 다루지만 `transform`만 바꾸므로 원인에서 제외했다.
+- 개선은 "발동 빈도를 줄이는 것"과 "발동당 비용을 줄이는 것" 두 축으로 나눠 제시했고, 사용자가 둘 다 적용을 선택했다. 비용을 줄이는 쪽은 `filter` 대신 `opacity`로 바꾸는 안을 택했다 — `transform`은 이미 `--intensity`/`--burst` 커스텀 프로퍼티로 파동·프레스·burst 이펙트가 쓰고 있어서, 콤보 플래시가 같은 속성을 애니메이션하면 정답 클릭 시 함께 뜨는 burst와 짧게 충돌할 수 있기 때문에 제외했다.
+
+**해결 과정**
+1. `src/services/weatherApi.js`의 `fetchCurrentWeather`에 모듈 스코프 인메모리 캐시(TTL 10분)를 추가했다. 새로고침 간 유지는 필요 없어 localStorage 대신 `Map`만 썼다.
+
+   #### `src/services/weatherApi.js`
+   ```js
+   const CACHE_TTL_MS = 10 * 60 * 1000
+   const weatherCache = new Map() // city.query -> { data, fetchedAt }
+
+   export async function fetchCurrentWeather(city) {
+     const cached = weatherCache.get(city.query)
+     if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
+       return cached.data
+     }
+     // ...기존 axios 호출 및 가공...
+     weatherCache.set(city.query, { data: result, fetchedAt: Date.now() })
+     return result
+   }
+   ```
+2. `src/views/WeatherMapView.vue`의 콤보 플래시 트리거 조건에 `% 2 === 0`을 추가해 발동 빈도를 절반으로 줄였다.
+
+   ```js
+   if (result.tier === 'correct') {
+     if (game.combo.value >= 2 && game.combo.value % 2 === 0) mapDotsRef.value?.flashKorea()
+   }
+   ```
+3. `src/components/practices/weather/KoreaMapDots.vue`의 `korea-combo-flash` 키프레임을 `filter: brightness()`에서 `opacity`(1 → 0.55 → 1)로 교체했다.
+4. Chrome 확장으로 검증 — 홈→지도(클라이언트 사이드 라우팅)로 이동했을 때 `read_network_requests`로 OpenWeatherMap 요청이 **0건**(캐시 적중)임을 확인했고, 지도 화면도 캐시된 데이터로 정상 렌더링됨을 확인했다. 게임을 실행해 정답 시 근접(near) 채점이 정상 동작함을 재확인했고(이전 라운드 회귀 없음), 콘솔 에러 없음과 `korea-combo-flash` 키프레임이 실제로 `opacity`로 컴파일됐음을 JS로 직접 스타일시트를 조회해 확인했다.
+
+**트러블슈팅**
+- 문제: 캐싱 동작을 확인하려고 처음에 `navigate` 툴로 URL을 바꿔가며 홈↔지도를 오갔는데, 이 방식은 브라우저 풀 페이지 리로드라 매번 JS 모듈이 새로 로드되어 인메모리 캐시가 리셋됐다 — 캐시가 있어도 없는 것처럼 매번 요청이 나갔다.
+- 해결: 앱 안의 nav 링크를 실제로 클릭해 Vue Router의 클라이언트 사이드 라우팅으로 이동하도록 바꿔서 같은 JS 실행 컨텍스트를 유지한 채 재검증했고, 그제서야 요청이 0건임을 확인할 수 있었다.
+- 문제: 콤보 플래시가 0.6초짜리 애니메이션이라 브라우저 자동화 스크린샷의 왕복 지연 안에 정확히 포착하기 어려웠다.
+- 해결: 시각적으로 캡처하는 대신, 페이지에 주입한 JS로 실제 적용된 스타일시트 규칙(`@keyframes korea-combo-flash`)을 직접 조회해 `opacity`로 컴파일됐음을 코드 레벨에서 확인하는 방식으로 대체했다.
+
+**결과**
+- `npm run lint`(oxlint+eslint, 기존 무관한 오류 1건 제외), `npx vite build` 통과.
+- 홈→지도 클라이언트 라우팅 이동 시 OpenWeatherMap 요청 0건(캐시 적중) 확인.
+- `korea-combo-flash` 키프레임이 `opacity` 기반으로 정상 컴파일됨을 확인, 콘솔 에러 없음.
+- 게임 근접 채점(예: 울릉도 근처 클릭 → "아깝다! 정답은 울릉도 · 그래도 근처라 +17")이 정상 동작함을 재확인.
+
+**느낀점**
+- "이런 API 기능이 있었던 것 같다"는 기억에 의존하지 않고 웹 검색으로 최신 상태(엔드포인트 폐지 여부)를 먼저 확인한 게 이번 판단에서 가장 중요했다 — API 문서/스펙은 계속 바뀌므로, 특히 "우회 방법을 구현해달라"처럼 구체적인 기술적 사실에 기반한 요청일수록 구현 전에 사실관계부터 검증해야 한다는 걸 다시 확인했다.
+- 성능 문제를 "느리다"는 느낌으로 접근하지 않고 정확히 어떤 CSS 속성이 몇 개의 엘리먼트에 걸리는지까지 코드로 짚어낸 다음에 고치니, 수정 범위가 아주 작았다(키프레임 속성 하나, 트리거 조건 한 줄) — 막연한 "최적화"보다 정확한 원인 진단이 항상 더 작고 안전한 수정으로 이어진다는 걸 다시 느꼈다.
+
+---
+
 <!--
 아래 형식을 복사해서 작업 단위마다 항목을 추가합니다.
 
