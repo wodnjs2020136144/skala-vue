@@ -44,16 +44,23 @@ async function loadWeatherList() {
 onMounted(loadWeatherList)
 watch(() => demoStore.useDummyData, loadWeatherList)
 
-// 검색어가 비면 원본 전체, 일치하면 필터링된 결과가 자연히 반환됨
+// 검색어가 비면 원본 전체, 일치하면 필터링된 결과가 자연히 반환됨. 공백만 입력했을 때도
+// 빈 검색어와 같이 취급하도록 trim한다.
 const filteredWeatherList = computed(() =>
-  weatherList.value.filter((city) => city.name.includes(searchStore.query)),
+  weatherList.value.filter((city) => city.name.includes(searchStore.query.trim())),
 )
+
+// 섭씨 원본 → 현재 선택된 단위(℃/℉)로 변환. 도시 카드뿐 아니라 아래 요약줄(평균/최고/최저)도
+// 이 함수를 공유해, ℉로 전환했을 때 카드 숫자와 요약줄 숫자가 서로 어긋나지 않게 한다.
+function convertTemp(celsius) {
+  return configStore.unit === 'imperial' ? Math.round((celsius * 9) / 5 + 32) : celsius
+}
 
 // 화면 표시용 온도만 단위에 맞춰 변환하고, 더움/선선함 판정은 항상 섭씨 원본(city.temp) 기준으로 유지한다.
 const displayWeatherList = computed(() =>
   filteredWeatherList.value.map((city) => ({
     ...city,
-    displayTemp: configStore.unit === 'imperial' ? Math.round((city.temp * 9) / 5 + 32) : city.temp,
+    displayTemp: convertTemp(city.temp),
     unitSymbol: configStore.unitSymbol,
   })),
 )
@@ -110,7 +117,7 @@ function handleClickDetail(city) {
 
 <template>
   <div class="weather-parent">
-    <h2 class="weather-parent__title"></h2>
+    <h2 class="weather-parent__title">오늘의 날씨</h2>
 
     <BaseDashboardCard>
       <template #search>
@@ -135,10 +142,10 @@ function handleClickDetail(city) {
           </div>
 
           <p v-if="averageTemp !== null" class="weather-parent__summary">
-            즐겨찾기 {{ favoriteCount }}개 · 검색 결과 {{ filteredCount }}개 · 평균 {{ averageTemp }}°
-            · 최고 {{ hottestCity?.name }}({{ hottestCity?.temp }}°) · 최저 {{ coldestCity?.name }}({{
-              coldestCity?.temp
-            }}°)
+            즐겨찾기 {{ favoriteCount }}개 · 검색 결과 {{ filteredCount }}개 · 평균 {{ convertTemp(averageTemp) }}{{ configStore.unitSymbol }}
+            · 최고 {{ hottestCity?.name }}({{ convertTemp(hottestCity?.temp) }}{{ configStore.unitSymbol }}) · 최저 {{ coldestCity?.name }}({{
+              convertTemp(coldestCity?.temp)
+            }}{{ configStore.unitSymbol }})
           </p>
 
           <ul v-if="sortedWeatherList.length > 0" class="city-list">

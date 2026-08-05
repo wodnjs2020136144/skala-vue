@@ -42,6 +42,7 @@ export function useDraggable(initial = { x: 0, y: 0 }) {
     pointerId = null
     window.removeEventListener('pointermove', handlePointerMove)
     window.removeEventListener('pointerup', handlePointerUp)
+    window.removeEventListener('pointercancel', handlePointerUp)
   }
 
   // 헤더(드래그 핸들)의 @pointerdown에 연결한다. 헤더 안의 버튼 클릭과 겹치지 않도록,
@@ -60,6 +61,9 @@ export function useDraggable(initial = { x: 0, y: 0 }) {
 
     window.addEventListener('pointermove', handlePointerMove)
     window.addEventListener('pointerup', handlePointerUp)
+    // 브라우저가 드래그 도중 포인터를 취소하는 경우(예: 다른 제스처와 충돌)까지 잡아 리스너가
+    // 계속 남아있는 걸 막는다 — 안 잡으면 포인터를 뗀 뒤에도 창이 마우스를 계속 따라다닐 수 있다.
+    window.addEventListener('pointercancel', handlePointerUp)
   }
 
   // 자동 배치(예: 팝업이 클릭 지점 기준으로 위치를 다시 잡는 경우) 쪽에서 호출한다.

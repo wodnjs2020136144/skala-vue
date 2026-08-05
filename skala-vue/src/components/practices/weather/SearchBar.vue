@@ -17,7 +17,8 @@ function handleInput(e) {
 <template>
   <div class="search-bar">
     <FontAwesomeIcon icon="magnifying-glass" class="search-bar__icon" />
-    <input class="search-bar__input" :value="query" @input="handleInput" placeholder="도시명을 검색하세요" />
+    <input class="search-bar__input" :value="query" @input="handleInput" placeholder="도시명을 검색하세요"
+      aria-label="도시 검색" />
   </div>
 </template>
 

@@ -1,9 +1,12 @@
 <script setup>
-import { ref } from 'vue'
+import { onUnmounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const downloadProgress = ref(0)
 const isDownloading = ref(false)
+let downloadIntervalId = null
+
+onUnmounted(() => clearInterval(downloadIntervalId))
 
 function confirmDelete() {
   // 교재 원본은 type: 'danger'였으나 ElMessageBox가 지원하는 타입이 아니라 'warning'으로 수정
@@ -24,10 +27,10 @@ function startDownload() {
   if (isDownloading.value) return
   isDownloading.value = true
   downloadProgress.value = 0
-  const interval = setInterval(() => {
+  downloadIntervalId = setInterval(() => {
     downloadProgress.value += 20
     if (downloadProgress.value >= 100) {
-      clearInterval(interval)
+      clearInterval(downloadIntervalId)
       isDownloading.value = false
       ElMessage.success('💾 대용량 데이터 로드가 완료되었습니다!')
     }

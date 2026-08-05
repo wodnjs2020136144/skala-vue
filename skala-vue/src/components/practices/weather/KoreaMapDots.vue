@@ -208,7 +208,7 @@ function buildGrid(width, height) {
   landMask = newLandMask
   frameScratch = new Float32Array(cellCount)
   burstScratch = new Float32Array(cellCount)
-  burstVariant = new Array(cellCount).fill(null)
+  burstVariant = Array.from({ length: cellCount }, () => null)
   prevTouched = []
   prevBurstTouched = []
   refreshDotElements()
@@ -239,12 +239,17 @@ const MIN_SCALE = 1 // 최대 축소 = 화면을 여백 없이 도트로 꽉 채
 const MAX_SCALE = 2.4 // 최대 확대
 const DEFAULT_SCALE = MIN_SCALE // 처음 진입 시 바로 이 상태로 시작한다
 const ZOOM_SENSITIVITY = 0.0015
-const DRIFT_RATIO = 0.6 // 커서가 가장자리로 갈수록 팬 가용 범위의 몇 %까지 끌려가는지
+// 커서가 가장자리로 갈수록 팬 가용 범위의 몇 %까지 끌려가는지. 게임 중(gameActive)에는 확대된
+// 상태(zoomToKorea)에서 반대쪽 끝까지 커서 추종만으로 닿아야 하므로 훨씬 넉넉하게 둔다.
+const DRIFT_RATIO_IDLE = 0.6
+const DRIFT_RATIO_GAME = 0.95
 const PAN_LERP = 0.12
+const SCALE_LERP = 0.12
 
 let containerW = 0
 let containerH = 0
 let scale = DEFAULT_SCALE
+let targetScale = DEFAULT_SCALE
 let panX = 0
 let panY = 0
 let targetPanX = 0
@@ -290,18 +295,19 @@ function refreshRects() {
 // 커서가 중심에서 벗어난 방향으로 지도가 살짝 끌려오도록, pan의 목표값을 커서 위치에 맞춰 갱신한다.
 function updateDriftTarget(cx, cy) {
   if (!containerW || !containerH) return
+  const driftRatio = props.gameActive ? DRIFT_RATIO_GAME : DRIFT_RATIO_IDLE
   const nx = clamp((cx / containerW - 0.5) * 2, -1, 1)
   const ny = clamp((cy / containerH - 0.5) * 2, -1, 1)
 
   const [minX, maxX] = panRangeX()
   const centerX = (minX + maxX) / 2
   const rangeX = (maxX - minX) / 2
-  targetPanX = centerX - nx * rangeX * DRIFT_RATIO
+  targetPanX = centerX - nx * rangeX * driftRatio
 
   const [minY, maxY] = panRangeY()
   const centerY = (minY + maxY) / 2
   const rangeY = (maxY - minY) / 2
-  targetPanY = centerY - ny * rangeY * DRIFT_RATIO
+  targetPanY = centerY - ny * rangeY * driftRatio
 }
 
 function handleWheel(event) {
@@ -319,6 +325,7 @@ function handleWheel(event) {
   panX = cx - (cx - panX) * (newScale / scale)
   panY = cy - (cy - panY) * (newScale / scale)
   scale = newScale
+  targetScale = newScale
   clampPan()
   targetPanX = panX
   targetPanY = panY
@@ -392,6 +399,17 @@ function ensureTicking() {
 
 function tick(now) {
   let needMore = false
+
+  // 확대/축소를 목표값으로 부드럽게 보간한다(게임 시작/종료 시 zoomToKorea/resetZoom이 목표를
+  // 바꾼다). scale이 바뀌면 pan의 허용 범위(panRangeX/Y)도 같이 바뀌므로 매 프레임 다시 clamp한다.
+  const ds = targetScale - scale
+  if (Math.abs(ds) > 0.001) {
+    scale += ds * SCALE_LERP
+    clampPan()
+    needMore = true
+  } else {
+    scale = targetScale
+  }
 
   // 커서 추종 팬을 목표값으로 부드럽게 보간한다.
   const dx = targetPanX - panX
@@ -583,31 +601,61 @@ function tick(now) {
   }
 }
 
+// 클릭(mousedown)했을 때, 또는 버튼을 누른 채 드래그(mousemove)하는 동안 지나가는 칸마다
+// 파동(바다)/눌림(육지)을 트리거한다. 단순히 커서를 올리기만 해서는 아무 일도 일어나지
+// 않는다 — 예전엔 호버만으로도 반응해 마우스를 조금만 움직여도 매 프레임 이펙트 계산이
+// 돌았는데, 클릭/드래그로 조건을 좁혀 평소엔 계산 비용이 0이 되도록 했다.
+let isPointerDown = false
+
+// 화면 좌표(clientX/Y)를 그리드 칸 좌표로 변환한다. 그리드의 실제 화면 rect는 이미
+// transform(줌/팬)이 반영돼 있어, 별도 역변환 없이 비율만으로 칸 좌표를 구할 수 있다.
+// rect는 캐시된 값을 쓴다(줌/팬이 바뀔 때만 갱신됨).
+function pointToColRow(clientX, clientY) {
+  if (!cachedGridRect) return null
+  const col = Math.floor(((clientX - cachedGridRect.left) / cachedGridRect.width) * cols.value)
+  const row = Math.floor(((clientY - cachedGridRect.top) / cachedGridRect.height) * rows.value)
+  if (col < 0 || col >= cols.value || row < 0 || row >= rows.value) return null
+  return { col, row }
+}
+
+// 같은 칸 안에서는 중복 트리거하지 않는다 — lastActiveCol/Row로 "마지막으로 반응한 칸"을
+// 기억해두고, 칸이 바뀔 때만(즉 드래그가 그 칸에 처음 들어온 순간에만) 반응한다.
+function triggerCellEffect(col, row) {
+  if (col === lastActiveCol && row === lastActiveRow) return
+  lastActiveCol = col
+  lastActiveRow = row
+  const idx = row * cols.value + col
+  // 도시 도트는 클릭 시 별도로 burst(handleCityDotClick)가 뜨므로, 여기서 프레스까지 겹치면
+  // 연출이 지저분해진다 — 도시 칸은 건너뛴다.
+  if (dots.value[idx]?.city) return
+  if (landMask[idx]) spawnPress(col, row)
+  else spawnRipple(col, row)
+  ensureTicking()
+}
+
+function handleMouseDown(event) {
+  if (!rootRef.value || !gridRef.value) return
+  if (!cachedRootRect || !cachedGridRect) refreshRects()
+  isPointerDown = true
+  const cell = pointToColRow(event.clientX, event.clientY)
+  if (cell) triggerCellEffect(cell.col, cell.row)
+}
+
+function handleMouseUp() {
+  isPointerDown = false
+  lastActiveCol = null
+  lastActiveRow = null
+}
+
 function handleMouseMove(event) {
   if (!rootRef.value || !gridRef.value) return
   if (!cachedRootRect || !cachedGridRect) refreshRects()
 
   updateDriftTarget(event.clientX - cachedRootRect.left, event.clientY - cachedRootRect.top)
 
-  // 그리드의 실제 화면 rect는 이미 transform(줌/팬)이 반영돼 있어, 별도 역변환 없이
-  // 비율만으로 칸 좌표를 구할 수 있다. rect는 캐시된 값을 쓴다(줌/팬이 바뀔 때만 갱신됨).
-  const col = Math.floor(((event.clientX - cachedGridRect.left) / cachedGridRect.width) * cols.value)
-  const row = Math.floor(((event.clientY - cachedGridRect.top) / cachedGridRect.height) * rows.value)
-
-  if (col >= 0 && col < cols.value && row >= 0 && row < rows.value) {
-    // 같은 칸에 머무는 동안은 아무 것도 새로 만들지 않는다 — 칸이 바뀔 때만 1회 반응한다.
-    if (col !== lastActiveCol || row !== lastActiveRow) {
-      lastActiveCol = col
-      lastActiveRow = row
-      // 게임 진행 중에는 파동/프레스를 만들지 않는다 — 정답을 찾느라 지도 전체를 빠르게
-      // 훑는 조작 패턴에서 매 프레임 수백~수천 개 도트의 스타일을 다시 쓰게 되어 렉의
-      // 주된 원인이었다. 클릭 시 burst 피드백(정답/오답)은 게임 중에도 그대로 남는다.
-      if (!props.gameActive) {
-        const idx = row * cols.value + col
-        if (landMask[idx]) spawnPress(col, row)
-        else spawnRipple(col, row)
-      }
-    }
+  if (isPointerDown) {
+    const cell = pointToColRow(event.clientX, event.clientY)
+    if (cell) triggerCellEffect(cell.col, cell.row)
   }
 
   ensureTicking()
@@ -636,6 +684,7 @@ onMounted(() => {
   buildGrid(containerW, containerH)
 
   scale = DEFAULT_SCALE
+  targetScale = DEFAULT_SCALE
   panX = containerW * (1 - scale) / 2
   panY = containerH * (1 - scale) / 2
   targetPanX = panX
@@ -645,11 +694,15 @@ onMounted(() => {
   resizeObserver = new ResizeObserver(handleResize)
   resizeObserver.observe(rootRef.value)
   rootRef.value.addEventListener('wheel', handleWheel, { passive: false })
+  // 버튼을 지도 바깥에서 떼는 경우까지 잡기 위해 mouseup은 window에 건다(mousedown/move는
+  // 지도 안에서만 의미가 있어 템플릿에 직접 바인딩한다).
+  window.addEventListener('mouseup', handleMouseUp)
 })
 
 onUnmounted(() => {
   resizeObserver?.disconnect()
   rootRef.value?.removeEventListener('wheel', handleWheel)
+  window.removeEventListener('mouseup', handleMouseUp)
   if (rafId) cancelAnimationFrame(rafId)
   clearTimeout(comboFlashTimeoutId)
   clearTimeout(shakeTimeoutId)
@@ -662,7 +715,8 @@ function handleCityDotClick(dot, event) {
 
 // 게임 진행 중에는 도시 여부와 무관하게 모든 칸 클릭이 map-pick으로 나가고, 날씨 팝업은
 // 뜨지 않는다(게임 중 팝업이 뜨면 방해된다). 게임이 꺼져 있을 때는 기존처럼 도시 도트는
-// 팝업을 열고, 바다 도트는 그 자리에서 파동이 일렁이는 이펙트를 낸다.
+// 팝업을 연다. 바다/육지 클릭의 파동·눌림 이펙트는 handleMouseDown이 이미 처리한다(클릭도
+// mousedown을 거치므로 여기서 또 트리거할 필요가 없다).
 function handleDotClick(dot, event) {
   if (props.gameActive) {
     emit('map-pick', { col: dot.col, row: dot.row })
@@ -670,9 +724,6 @@ function handleDotClick(dot, event) {
   }
   if (dot.city) {
     handleCityDotClick(dot, event)
-  } else if (!dot.isLand) {
-    spawnRipple(dot.col, dot.row)
-    ensureTicking()
   }
 }
 
@@ -683,6 +734,43 @@ function mapToColRow(mapX, mapY) {
   const localCol = Math.round(mapX * GRID_W - 0.5)
   const localRow = Math.round(mapY * GRID_H - 0.5)
   return { col: koreaOffsetCol + localCol, row: koreaOffsetRow + localRow }
+}
+
+// --- 게임 줌: 시작하면 한반도가 화면을 크게 채우고, 끝나면 원래대로 돌아온다 ---
+// scale/panX/panY는 tick()에서 targetScale/targetPanX/Y를 향해 매 프레임 보간되므로,
+// 여기서는 목표값만 세팅하고 ensureTicking()으로 보간을 깨우면 된다.
+function zoomToKorea() {
+  // 한반도 세로(GRID_H칸)의 절반이 화면(rows.value칸)을 꽉 채우도록 확대한다.
+  targetScale = clamp(rows.value / (GRID_H / 2), MIN_SCALE, MAX_SCALE)
+  // 화면 중앙이 한반도 중앙에 오도록 pan을 계산한다 — buildGrid가 항상 koreaOffsetCol/Row를
+  // 그리드 중앙에 맞추므로, "그리드 자체의 중앙"(scale=1일 때 좌표로 containerW/2,
+  // containerH/2)이 곧 한반도 중앙이다. screen = pan + scale * local 공식(handleWheel과 동일)을
+  // 그 점에 대해 풀면 아래 식이 된다.
+  targetPanX = (containerW / 2) * (1 - targetScale)
+  targetPanY = (containerH / 2) * (1 - targetScale)
+  ensureTicking()
+}
+
+function resetZoom() {
+  targetScale = MIN_SCALE
+  targetPanX = (containerW * (1 - MIN_SCALE)) / 2
+  targetPanY = (containerH * (1 - MIN_SCALE)) / 2
+  ensureTicking()
+}
+
+// --- 게임 채점 보조: 클릭한 칸이 어떤 종류인지 알려준다(정답 근처 지역이 없을 때, "여기가
+// 어디였는지"를 좀 더 구체적으로 알려주기 위함) ---
+// 북한/남한 경계는 실제 휴전선(서쪽이 더 남쪽으로 내려오는 사선)을 그대로 반영하지 않고,
+// KOREA_MATRIX 위의 가로선 하나로 근사한다. 문제 지역 중 최북단인 속초가 localRow 18이라,
+// 그보다 위(localRow <= 17)의 육지는 전부 북한으로 본다.
+const NORTH_KOREA_ROW_BOUNDARY = 17
+function describeCell(col, row) {
+  const localCol = col - koreaOffsetCol
+  const localRow = row - koreaOffsetRow
+  const isLand =
+    localCol >= 0 && localCol < GRID_W && localRow >= 0 && localRow < GRID_H && KOREA_MATRIX[localRow][localCol] === '1'
+  if (!isLand) return 'sea'
+  return localRow <= NORTH_KOREA_ROW_BOUNDARY ? 'north' : 'land'
 }
 
 // --- 콤보 이펙트: 연속으로 맞히면 한반도 전체가 한 번 빛난다 ---
@@ -745,7 +833,7 @@ function showHint(col, row) {
   }
 }
 
-defineExpose({ spawnBurst, mapToColRow, flashKorea, shakeKorea, showHint, clearHint })
+defineExpose({ spawnBurst, mapToColRow, flashKorea, shakeKorea, showHint, clearHint, zoomToKorea, resetZoom, describeCell })
 
 function handleCityHover(dot, event) {
   hoveredDot.value = dot
@@ -768,6 +856,7 @@ function handleCityHover(dot, event) {
       'is-combo-flashing': isComboFlashing,
       'is-game-over-shaking': isGameOverShaking,
     }"
+    @mousedown="handleMouseDown"
     @mousemove="handleMouseMove"
     @mouseleave="handleMouseLeave"
   >

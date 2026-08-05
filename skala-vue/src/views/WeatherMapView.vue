@@ -198,25 +198,38 @@ function startGame() {
 }
 
 // 게임이 진행 중일 때만 지도가 클릭을 map-pick으로 보낸다(KoreaMapDots의 gameActive prop).
-// 정답 위치에는 항상(기존 크림색 burst), 오답이면 클릭한 위치에도 빨간 burst를 추가로 띄워
-// "여기가 틀렸다"를 바로 알 수 있게 한다. 콤보가 2 이상으로 이어지면(연속 정답) 한반도
-// 전체가 한 번 빛나는 이펙트를 함께 띄운다.
+// 정답 위치에는 항상(기존 크림색 burst), 완전 오답이면 클릭한 위치에도 빨간 burst를 추가로
+// 띄워 "여기가 틀렸다"를 바로 알 수 있게 한다 — 근접(near)은 감점도 없고 다른 지역과
+// 겹쳤을 뿐이므로 빨간 burst 없이 정답과 같은 크림색 burst만 준다. 콤보가 2 이상으로
+// 이어지면(연속 정답) 한반도 전체가 한 번 빛나는 이펙트를 함께 띄운다.
 function handleMapPick({ col, row }) {
-  const result = game.submitGuess(col, row, (mapX, mapY) => mapDotsRef.value?.mapToColRow(mapX, mapY))
+  const result = game.submitGuess(
+    col,
+    row,
+    (mapX, mapY) => mapDotsRef.value?.mapToColRow(mapX, mapY),
+    (c, r) => mapDotsRef.value?.describeCell(c, r),
+  )
   if (!result) return
   mapDotsRef.value?.spawnBurst(result.answer.col, result.answer.row, 'correct')
-  if (result.correct) {
+  if (result.tier === 'correct') {
     if (game.combo.value >= 2) mapDotsRef.value?.flashKorea()
-  } else {
+  } else if (result.tier === 'wrong') {
     mapDotsRef.value?.spawnBurst(result.clicked.col, result.clicked.row, 'wrong')
   }
 }
 
-// 게임이 끝나는 순간(시간 종료든 문제를 다 풀었든) 한반도 전체가 들썩이는 이펙트를 띄운다.
+// 게임 상태 전환에 맞춰 지도 줌을 함께 바꾼다: 시작하면 한반도가 화면을 크게 채우도록
+// 확대하고, 끝나면(시간 종료든 문제를 다 풀었든) 한반도가 들썩이는 이펙트와 함께 원래
+// 축소 상태로 되돌아온다.
 watch(
   () => game.status.value,
   (status) => {
-    if (status === 'finished') mapDotsRef.value?.shakeKorea()
+    if (status === 'playing') {
+      mapDotsRef.value?.zoomToKorea()
+    } else if (status === 'finished') {
+      mapDotsRef.value?.shakeKorea()
+      mapDotsRef.value?.resetZoom()
+    }
   },
 )
 
@@ -245,7 +258,9 @@ const formattedTimeLeft = computed(() => {
 const mascotCondition = computed(() => {
   const result = game.lastResult.value
   if (!result) return 'cloud'
-  return result.correct ? 'sun' : 'rain'
+  if (result.tier === 'correct') return 'sun'
+  if (result.tier === 'near') return 'cloud'
+  return 'rain'
 })
 </script>
 
@@ -275,7 +290,7 @@ const mascotCondition = computed(() => {
                 @click="selectCityById(city)">
                 <DotMatrixIcon :condition="city.condition" size="sm" :animated="false" />
                 <span class="map-window__item-name">{{ city.name }}</span>
-                <span class="map-window__item-temp">{{ convertTemp(city.temp) }}°</span>
+                <span class="map-window__item-temp">{{ convertTemp(city.temp) }}{{ configStore.unitSymbol }}</span>
               </button>
               <p v-if="favoriteCitiesWithWeather.length === 0" class="map-window__empty">
                 즐겨찾기한 도시가 없어요
@@ -291,7 +306,7 @@ const mascotCondition = computed(() => {
                 @click="selectCityById(city)">
                 <span class="map-window__rank">{{ index + 1 }}</span>
                 <span class="map-window__item-name">{{ city.name }}</span>
-                <span class="map-window__item-temp">{{ convertTemp(city.temp) }}°</span>
+                <span class="map-window__item-temp">{{ convertTemp(city.temp) }}{{ configStore.unitSymbol }}</span>
               </button>
               <p class="map-window__subtitle">
                 <PixelTempIcon variant="cold" :size="14" /> 가장 추운 지역
@@ -300,7 +315,7 @@ const mascotCondition = computed(() => {
                 @click="selectCityById(city)">
                 <span class="map-window__rank">{{ index + 1 }}</span>
                 <span class="map-window__item-name">{{ city.name }}</span>
-                <span class="map-window__item-temp">{{ convertTemp(city.temp) }}°</span>
+                <span class="map-window__item-temp">{{ convertTemp(city.temp) }}{{ configStore.unitSymbol }}</span>
               </button>
             </section>
           </div>
@@ -331,12 +346,13 @@ const mascotCondition = computed(() => {
                   game.combo.value }}
               </p>
               <p v-if="game.lastResult.value" class="game-window__feedback"
-                :class="{ 'is-correct': game.lastResult.value.correct }">
+                :class="{ 'is-correct': game.lastResult.value.tier === 'correct', 'is-near': game.lastResult.value.tier === 'near' }">
                 {{
-                  game.lastResult.value.correct
+                  game.lastResult.value.tier === 'correct'
                     ? `정답! +${game.lastResult.value.points}`
-                    : `아쉬워요! 정답은 ${game.lastResult.value.region.name} · 클릭한 곳: ${game.lastResult.value.clickedRegionName ??
-                    '바다 근처'} · -${game.lastResult.value.penalty}`
+                    : game.lastResult.value.tier === 'near'
+                      ? `아깝다! 정답은 ${game.lastResult.value.region.name} · 그래도 근처라 +${game.lastResult.value.points}`
+                      : `아쉬워요! 정답은 ${game.lastResult.value.region.name} · 클릭한 곳: ${game.lastResult.value.clickedRegionName} · -${game.lastResult.value.penalty}`
                 }}
               </p>
             </template>
@@ -345,8 +361,8 @@ const mascotCondition = computed(() => {
               <DotMatrixIcon condition="sun" size="sm" :animated="true" />
               <p class="game-window__result">최종 점수 {{ game.score.value }}점</p>
               <ol class="game-window__leaderboard">
-                <li v-for="(entry, index) in game.leaderboard.value" :key="index"
-                  :class="{ 'is-current': entry === game.score.value }">
+                <li v-for="(entry, index) in game.leaderboard.value" :key="`${index}-${entry}`"
+                  :class="{ 'is-current': index === game.lastRankIndex.value }">
                   {{ index + 1 }}위 · {{ entry }}점
                 </li>
               </ol>
@@ -368,15 +384,16 @@ const mascotCondition = computed(() => {
                 <p class="weather-popup__name">{{ selectedCity.name }}</p>
                 <div class="weather-popup__head-actions" @pointerdown.stop>
                   <UnitToggler />
-                  <button class="weather-popup__fav-btn" @click="favoritesStore.toggleFavorite(selectedCity.id)">
+                  <button class="weather-popup__fav-btn" :aria-pressed="favoritesStore.isFavorite(selectedCity.id)"
+                    aria-label="즐겨찾기 추가/해제" @click="favoritesStore.toggleFavorite(selectedCity.id)">
                     <FavoriteHeartDots :active="favoritesStore.isFavorite(selectedCity.id)" :size="20" />
                   </button>
-                  <button class="weather-popup__close-btn" @click="closePopup">✕</button>
+                  <button class="weather-popup__close-btn" aria-label="닫기" @click="closePopup">✕</button>
                 </div>
               </div>
 
               <p class="weather-popup__temp">
-                {{ displayTemp }}<span>°{{ configStore.unitSymbol }}</span>
+                {{ displayTemp }}<span>{{ configStore.unitSymbol }}</span>
               </p>
 
               <WeatherStatsPanel :city="selectedCity" compact />
@@ -585,6 +602,10 @@ const mascotCondition = computed(() => {
 
 .game-window__feedback.is-correct {
   color: var(--moss);
+}
+
+.game-window__feedback.is-near {
+  color: var(--sea);
 }
 
 .game-window__result {

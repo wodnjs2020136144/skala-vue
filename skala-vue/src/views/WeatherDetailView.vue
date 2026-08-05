@@ -67,7 +67,7 @@ const displayTemp = computed(() => {
         <p class="weather-detail__name">{{ weather.name }}</p>
         <UnitToggler />
       </div>
-      <p class="weather-detail__temp">{{ displayTemp }}<span>°{{ configStore.unitSymbol }}</span></p>
+      <p class="weather-detail__temp">{{ displayTemp }}<span>{{ configStore.unitSymbol }}</span></p>
 
       <WeatherStatsPanel :city="weather" />
     </div>

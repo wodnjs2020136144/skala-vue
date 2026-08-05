@@ -17,7 +17,7 @@ const colorEnabled = ref(true)
 <template>
   <div class="preview-page">
     <div class="preview-page__header">
-      <h2 class="preview-page__title">DotMatrixIcon 애니메이션 미리보기 (4종 비교)</h2>
+      <h2 class="preview-page__title">DotMatrixIcon 애니메이션 미리보기 (6종 비교)</h2>
       <button class="preview-page__toggle" @click="colorEnabled = !colorEnabled">
         {{ colorEnabled ? '색상 적용 후' : '색상 적용 전' }} (클릭해서 전환)
       </button>

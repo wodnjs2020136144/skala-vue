@@ -80,8 +80,8 @@ function formatTime(unixSeconds) {
     </div>
 
     <p class="weather-stats-panel__extra">
-      체감 {{ displayFeelsLike }}° · 최저 {{ displayTempMin }}° · 최고
-      {{ displayTempMax }}° · 풍속 {{ city.windSpeed }}m/s
+      체감 {{ displayFeelsLike }}{{ configStore.unitSymbol }} · 최저 {{ displayTempMin }}{{ configStore.unitSymbol }} · 최고
+      {{ displayTempMax }}{{ configStore.unitSymbol }} · 풍속 {{ city.windSpeed }}m/s
     </p>
   </div>
 </template>

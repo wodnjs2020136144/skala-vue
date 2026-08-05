@@ -1571,6 +1571,103 @@
 
 ---
 
+## 22. 지도 인터랙션 최적화(클릭/드래그 전용) + 게임 줌·채점·안내 개선 + 전반 완성도 점검
+
+**요구사항**
+- (최적화) 파동·눌림 이펙트가 커서를 올리기만 해도 발생하던 것을, 클릭했을 때와 클릭한 채로 드래그할 때만 발생하도록 변경. 드래그 중 같은 픽셀 안에서는 중복 발생 없이 한 번만.
+- (게임 개선) 게임이 시작되면 한반도가 화면의 절반 정도를 채우도록 확대, 종료되면 다시 최대 축소로 복귀.
+- (게임 개선) 북한 지역을 클릭하면 "바다 근처"가 아니라 "북한"이라고 알려주기.
+- (게임 개선) 정답 근처(허용 범위 밖)를 클릭했는데 하필 다른 문제 지역과 겹쳐 완전 오답으로 처리되던 문제 완화 — 근접 시 부분 점수를 주고 감점하지 않기.
+- (완성도 점검) 기능적 사소한 버그와 표기 오류를 전체적으로 재검토해 완성도를 높이기.
+
+**사고 과정**
+- 이펙트 트리거 조건 변경은 기존 이펙트 엔진(`spawnRipple`/`spawnPress`/`tick`/`lastActiveCol,Row` 기반 "칸이 바뀔 때만 1회 트리거") 자체는 이미 잘 동작하고 있었으므로, 엔진은 그대로 두고 **호출 조건만** `mousemove`(항상)에서 `isPointerDown`일 때의 `mousedown`/`mousemove`로 옮기면 된다고 판단했다. 이렇게 하면 "게임 중에는 파동/프레스를 끈다"는 기존의 별도 억제 로직도 자연히 필요 없어진다 — 애초에 호버만으로는 아무것도 안 생기기 때문이다.
+- 게임 줌은 기존에 `panX/panY`만 `tick()`에서 `targetPanX/Y`로 매 프레임 보간되고 있었던 구조를 그대로 확장해, `scale`에도 `targetScale`을 두고 같은 방식으로 보간했다. `handleWheel`의 커서 고정 확대/축소가 쓰던 "screen = pan + scale × local" 공식을 그대로 재사용해, 한반도 중심(그리드 중심과 일치하도록 `buildGrid`가 이미 보장)을 화면 중앙에 오게 하는 `targetPanX/Y`를 계산했다. scale이 바뀌면 pan의 허용 범위(`panRangeX/Y`)도 함께 바뀌므로, 보간 중에는 매 프레임 `clampPan()`을 다시 불러야 한다는 점을 놓치지 않았다.
+- "한반도 절반이 화면을 채운다"는 요구를 정확한 배율로 확인하려면 사용자에게 물어야 한다고 판단해, "절반만 보이게(약 2.2배)" vs "전체가 다 보이게(약 1.5배)" 중 선택지를 제시했고, 사용자가 전자를 골랐다 — 그만큼 게임 중에는 커서 추종 팬(drift)이 반대쪽 끝까지 닿아야 하므로, 기존에 상수 하나였던 `DRIFT_RATIO`를 게임 중/평상시 두 값으로 나눴다.
+- 북한 판정은 문제 지역이 전부 남한이라 발생한 사각지대였다. 새 좌표 체계를 만드는 대신, 이미 `KoreaMapDots.vue`가 알고 있는 `KOREA_MATRIX`와 `koreaOffsetCol/Row`를 그대로 활용해 "이 칸이 북한/남한/바다 중 무엇인지"를 판정하는 `describeCell`을 추가하는 게 가장 자연스럽다고 봤다. 실제 휴전선은 사선이지만, 그렇게까지 정밀하게 만들 필요는 없다고 판단해 남한 최북단 문제 지역(속초, localRow 18)을 기준으로 한 가로선 근사로 단순화했다.
+- 근접 판정은 "감점 없는 부분 점수"로 처리하기로 사용자와 확인했다. 기존 2단계(정답/오답) 채점을 3단계(정답/근접/오답)로 확장하되, 뷰가 쓰는 `correct` 불리언은 `tier === 'correct'`로 그대로 파생시켜 다른 사용처(마스코트 표정 등)를 깨지 않게 했다.
+- 완성도 점검은 조사 전담 서브에이전트를 띄워 `src/` 62개 파일을 훑게 했다. 그 결과 나온 항목 중 "명백한 버그"(온도 단위 기호 중복·누락·미변환, 빈 `<h2>`)와 "쉽게 고칠 수 있는 사소한 버그"(타이머 미정리, `pointercancel` 미처리, 검색어 trim 누락, 리더보드 동점 강조 오류)는 바로 고치고, 체크리스트 필수 항목(디버그성으로 보이는 콘솔 로그 watch 3종은 사실 2일차 필수 요구사항)이나 이번 요청과 무관한 기존 코드(죽은 라우트, 중복 학습 데모)는 손대지 않고 보고만 하기로 판단했다.
+
+**해결 과정**
+1. `src/components/practices/weather/KoreaMapDots.vue`에서 파동/눌림 트리거를 클릭/드래그 전용으로 바꿨다. `handleMouseDown`이 눌린 시점에 한 번 트리거하고, `handleMouseMove`는 `isPointerDown`일 때만 같은 로직(`triggerCellEffect`)을 호출한다. 지도 밖에서 버튼을 떼는 경우까지 잡기 위해 `mouseup`은 `window`에 걸었다.
+
+   #### `src/components/practices/weather/KoreaMapDots.vue`
+   ```js
+   let isPointerDown = false
+   function triggerCellEffect(col, row) {
+     if (col === lastActiveCol && row === lastActiveRow) return
+     lastActiveCol = col
+     lastActiveRow = row
+     const idx = row * cols.value + col
+     if (dots.value[idx]?.city) return
+     if (landMask[idx]) spawnPress(col, row)
+     else spawnRipple(col, row)
+     ensureTicking()
+   }
+   function handleMouseDown(event) {
+     isPointerDown = true
+     const cell = pointToColRow(event.clientX, event.clientY)
+     if (cell) triggerCellEffect(cell.col, cell.row)
+   }
+   function handleMouseMove(event) {
+     // ...
+     if (isPointerDown) {
+       const cell = pointToColRow(event.clientX, event.clientY)
+       if (cell) triggerCellEffect(cell.col, cell.row)
+     }
+   }
+   ```
+2. 같은 파일에 `scale` 보간(`targetScale`)과 `zoomToKorea()`/`resetZoom()`, 북한 판정용 `describeCell()`을 추가하고 `defineExpose`에 노출했다. 게임 중에는 `DRIFT_RATIO_GAME`(0.95)을, 평상시엔 `DRIFT_RATIO_IDLE`(0.6)을 쓰도록 `updateDriftTarget`을 고쳤다.
+
+   ```js
+   function zoomToKorea() {
+     targetScale = clamp(rows.value / (GRID_H / 2), MIN_SCALE, MAX_SCALE)
+     targetPanX = (containerW / 2) * (1 - targetScale)
+     targetPanY = (containerH / 2) * (1 - targetScale)
+     ensureTicking()
+   }
+   const NORTH_KOREA_ROW_BOUNDARY = 17
+   function describeCell(col, row) {
+     const localCol = col - koreaOffsetCol
+     const localRow = row - koreaOffsetRow
+     const isLand = localCol >= 0 && localCol < GRID_W && localRow >= 0 && localRow < GRID_H
+       && KOREA_MATRIX[localRow][localCol] === '1'
+     if (!isLand) return 'sea'
+     return localRow <= NORTH_KOREA_ROW_BOUNDARY ? 'north' : 'land'
+   }
+   ```
+3. `src/composables/useRegionGame.js`의 `submitGuess`를 3단계 채점(정답/근접/오답)으로 바꾸고, `describeCell` 콜백을 받아 완전 오답일 때 "근처 문제 지역이 없으면 북한/육지/바다로 설명"하도록 확장했다. 동점 리더보드 강조를 위한 `lastRankIndex`도 추가했다.
+
+   #### `src/composables/useRegionGame.js`
+   ```js
+   const NEAR_TOLERANCE = 5
+   // ...
+   } else if (distance <= NEAR_TOLERANCE) {
+     tier = 'near'
+     points = Math.round(MAX_ROUND_SCORE * 0.4 * (1 - (distance - TOLERANCE) / (NEAR_TOLERANCE - TOLERANCE)))
+     combo.value = 0
+     score.value += points  // 감점 없음
+   }
+   ```
+4. `src/views/WeatherMapView.vue`에서 `game.status` watcher에 `'playing'` → `zoomToKorea()`, `'finished'` → `shakeKorea()` + `resetZoom()` 분기를 추가하고, 근접(`near`) 결과는 빨간 burst 없이 정답과 같은 크림색 burst만 뜨도록 했다. 리더보드 항목의 강조 조건을 `entry === score`(동점이면 전부 강조)에서 `index === lastRankIndex`(이번 기록의 자리만 강조)로 바꿨다.
+5. 전반 점검에서 발견한 버그를 수정했다 — 온도 단위 기호 중복(`°℃`, `WeatherDetailView.vue`/`WeatherMapView.vue`)과 누락(`WeatherMapView.vue`/`WeatherStatsPanel.vue`), `WeatherHomeView.vue` 요약줄이 ℉ 전환을 반영하지 않던 문제(변환 함수 공유로 해결), 빈 `<h2>`, `UnitToggler.vue`의 "현재 단위"로 읽히던 라벨을 "다음 단위"로, `DotMatrixPreviewView.vue`의 "4종"→"6종" 오기, `FileDeleteProgressChallenge.vue`의 `setInterval` 미정리, `useDraggable.js`의 `pointercancel` 미처리, 검색어 공백 trim 누락, 닫기/즐겨찾기/검색창 `aria-label` 보강.
+6. `npm run lint`(oxlint+eslint)와 `npx vite build`로 컴파일·정적 검사를 통과시켰다. 이 과정에서 이번 작업과 무관하게 이미 실패 중이던 pre-existing lint 오류 2건을 발견했다 — `KoreaMapDots.vue`의 `new Array(n)` 규칙 위반은 내가 이미 편집 중인 파일이라 `Array.from({ length: n }, () => null)`로 함께 고쳤고, `MiscDirectivesDemo.vue`의 미사용 변수는 완전히 무관한 파일이라 고치지 않고 보고만 한다.
+
+**트러블슈팅**
+- 문제: 이번에도 Chrome 브라우저 자동화 확장이 연결되지 않아(`tabs_context_mcp` 호출 시 확장 미연결 오류), 클릭/드래그 이펙트·게임 줌·북한 안내·근접 채점을 실제 화면에서 눈으로 확인하지 못했다.
+- 해결: `npm run lint`, `npx vite build`, 그리고 각 diff를 다시 읽으며 좌표 변환식(특히 `zoomToKorea`의 pan 계산식이 `handleWheel`의 커서 고정 공식과 일관되는지)을 수식으로 재검증하는 선에서 확인을 마쳤다. 실제 시각 확인은 사용자에게 요청했다.
+
+**결과**
+- `npm run lint`, `npx vite build` 모두 통과.
+- 코드상으로는: 평상시 마우스 이동만으로는 이펙트가 생기지 않고 클릭/드래그에만 반응, 게임 시작·종료 시 줌 전환, 북한 클릭 시 "북한" 안내, 정답 근처 클릭 시 감점 없는 부분 점수, 온도 단위 표기 일관성 확보까지 모두 구현됨. 실제 화면 확인은 사용자 몫으로 남음.
+
+**느낀점**
+- "호버만으로 반응하던 걸 클릭/드래그로 좁힌다"처럼 트리거 조건만 바꾸는 최적화는, 이미 잘 만들어둔 엔진(파동/프레스 계산, 같은 칸 중복 방지)을 건드리지 않고 호출부만 옮기는 것으로 충분했다 — 성능 문제를 "엔진을 다시 짜서" 해결하려 하기 전에, 먼저 "언제 엔진을 부르고 있는지"부터 의심해보는 습관이 유용했다.
+- 줌 보간을 추가할 때 기존 팬 보간 코드의 패턴(목표값 변수 + `tick()`에서 lerp)을 그대로 복제하니 새 코드가 기존 코드와 자연스럽게 섞였다 — 같은 파일 안에 이미 있는 패턴을 찾아 재사용하는 게, 새로운 방식을 고안하는 것보다 유지보수 관점에서 더 안전하다는 걸 다시 느꼈다.
+- 서브에이전트에게 "전체 코드베이스에서 사소한 버그·표기 오류를 찾아달라"고 위임했을 때, 우선순위(높음/중간/낮음)까지 매겨서 돌아온 결과를 그대로 다 고치는 대신 "이건 체크리스트 필수 요구사항이라 버그가 아니다"처럼 프로젝트 맥락을 다시 한번 대조해보는 단계가 필요했다 — 조사 결과를 곧이곧대로 실행하지 않고 한 번 더 걸러야 한다는 걸 확인했다.
+
+---
+
 <!--
 아래 형식을 복사해서 작업 단위마다 항목을 추가합니다.
 
