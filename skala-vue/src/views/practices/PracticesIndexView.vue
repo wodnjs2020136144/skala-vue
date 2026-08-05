@@ -59,4 +59,10 @@ import { RouterLink } from 'vue-router'
 .practices-index__link:hover {
   background: #f1f2f4;
 }
+
+@media (max-width: 640px) {
+  .practices-index {
+    padding: 18px;
+  }
+}
 </style>

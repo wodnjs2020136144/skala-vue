@@ -75,12 +75,20 @@ const KOREA_MATRIX = [
 ]
 
 // 도트 한 칸의 픽셀 크기 — 육지·바다 전체 그리드가 이 값 하나로 통일된다. 화면을 완전히
-// 채우기 위해 칸 수(cols/rows)는 항상 "컨테이너 픽셀 크기 / DOT_PX"로 동적 계산한다(화면
+// 채우기 위해 칸 수(cols/rows)는 항상 "컨테이너 픽셀 크기 / 도트 크기"로 동적 계산한다(화면
 // 일부만 도트로 그리고 나머지를 단색으로 비우면 안 된다 — 여백도 전부 바다 픽셀이어야 함).
-// 14→16으로 키운 이유: 한반도(22×41칸)는 크기가 고정이라, 도트가 커질수록 같은 칸 수가
-// 차지하는 실제 픽셀 면적이 커져 화면에서 한반도가 차지하는 비중이 자연히 커진다. 동시에
+// 16을 기본 상한으로 쓰는 이유: 한반도(22×41칸)는 크기가 고정이라, 도트가 커질수록 같은 칸
+// 수가 차지하는 실제 픽셀 면적이 커져 화면에서 한반도가 차지하는 비중이 자연히 커진다. 동시에
 // 같은 화면을 채우는 데 필요한 총 칸 수(=DOM 노드 수)는 줄어 성능에도 도움이 된다.
-const DOT_PX = 16
+const DOT_PX_MAX = 16
+const DOT_PX_MIN = 6
+
+// 모바일 세로 화면처럼 컨테이너 높이가 낮아 41행(GRID_H)이 고정 16px 도트로는 다 안 들어가는
+// 경우, 도트를 작게 써서 한반도 위/아래가 화면 밖으로 잘리지 않게 한다. 높이가 충분하면
+// 항상 DOT_PX_MAX(기존 동작과 동일)를 쓴다.
+function computeDotPx(height) {
+  return Math.max(DOT_PX_MIN, Math.min(DOT_PX_MAX, Math.floor(height / (GRID_H + 4))))
+}
 
 // 날씨 조건별 마커 색상.
 const CONDITION_COLORS = {
@@ -167,8 +175,9 @@ let koreaOffsetCol = 0
 let koreaOffsetRow = 0
 
 function buildGrid(width, height) {
-  const newCols = Math.max(1, Math.round(width / DOT_PX))
-  const newRows = Math.max(1, Math.round(height / DOT_PX))
+  const dotPx = computeDotPx(height)
+  const newCols = Math.max(1, Math.round(width / dotPx))
+  const newRows = Math.max(1, Math.round(height / dotPx))
   cols.value = newCols
   rows.value = newRows
 
@@ -620,11 +629,29 @@ function tick(now) {
   }
 }
 
-// 클릭(mousedown)했을 때, 또는 버튼을 누른 채 드래그(mousemove)하는 동안 지나가는 칸마다
+// 클릭/탭(pointerdown)했을 때, 또는 누른 채 드래그(pointermove)하는 동안 지나가는 칸마다
 // 파동(바다)/눌림(육지)을 트리거한다. 단순히 커서를 올리기만 해서는 아무 일도 일어나지
 // 않는다 — 예전엔 호버만으로도 반응해 마우스를 조금만 움직여도 매 프레임 이펙트 계산이
 // 돌았는데, 클릭/드래그로 조건을 좁혀 평소엔 계산 비용이 0이 되도록 했다.
+// mouse* 대신 pointer* 이벤트를 쓰는 이유: 터치(모바일)에서는 mousemove/mouseenter가 아예
+// 발생하지 않아 파동·프레스·툴팁이 전부 죽는다. pointer* 이벤트는 마우스·터치·펜을 하나의
+// API로 통일해 다룬다.
 let isPointerDown = false
+// 활성 포인터(손가락) 좌표 — 2개가 동시에 눌리면 핀치 줌으로 전환한다(휠이 없는 터치
+// 환경에서 확대/축소할 유일한 수단).
+const activePointers = new Map() // pointerId -> { x, y }
+let pinchStartDist = 0
+let pinchStartScale = DEFAULT_SCALE
+
+function pointerDistance() {
+  const [a, b] = [...activePointers.values()]
+  return Math.hypot(a.x - b.x, a.y - b.y)
+}
+
+function pointerMidpoint() {
+  const [a, b] = [...activePointers.values()]
+  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
+}
 
 // 화면 좌표(clientX/Y)를 그리드 칸 좌표로 변환한다. 그리드의 실제 화면 rect는 이미
 // transform(줌/팬)이 반영돼 있어, 별도 역변환 없이 비율만으로 칸 좌표를 구할 수 있다.
@@ -652,22 +679,64 @@ function triggerCellEffect(col, row) {
   ensureTicking()
 }
 
-function handleMouseDown(event) {
+function handlePointerDown(event) {
   if (!rootRef.value || !gridRef.value) return
+  activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY })
+
+  if (activePointers.size === 2) {
+    // 두 번째 손가락이 닿는 순간 핀치 줌 모드로 전환 — 파동/프레스 트리거는 멈춘다.
+    if (!cachedRootRect) refreshRects()
+    pinchStartDist = pointerDistance()
+    pinchStartScale = scale
+    isPointerDown = false
+    lastActiveCol = null
+    lastActiveRow = null
+    return
+  }
+  if (activePointers.size > 2) return
+
   if (!cachedRootRect || !cachedGridRect) refreshRects()
   isPointerDown = true
   const cell = pointToColRow(event.clientX, event.clientY)
   if (cell) triggerCellEffect(cell.col, cell.row)
 }
 
-function handleMouseUp() {
-  isPointerDown = false
-  lastActiveCol = null
-  lastActiveRow = null
+function endPointer(event) {
+  activePointers.delete(event.pointerId)
+  if (activePointers.size < 2) pinchStartDist = 0
+  if (activePointers.size === 0) {
+    isPointerDown = false
+    lastActiveCol = null
+    lastActiveRow = null
+  }
 }
 
-function handleMouseMove(event) {
+function handlePointerMove(event) {
   if (!rootRef.value || !gridRef.value) return
+  if (activePointers.has(event.pointerId)) {
+    activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY })
+  }
+
+  // 핀치 줌: 두 손가락 사이 거리 변화를 배율로, 두 손가락의 중점을 wheel 줌과 같은 방식으로
+  // "그 지점이 확대/축소 후에도 그대로 머무는" 기준점으로 삼는다(handleWheel과 동일한 보정식).
+  if (activePointers.size === 2 && pinchStartDist > 0) {
+    if (!cachedRootRect) refreshRects()
+    const dist = pointerDistance()
+    const mid = pointerMidpoint()
+    const cx = mid.x - cachedRootRect.left
+    const cy = mid.y - cachedRootRect.top
+    const newScale = clamp(pinchStartScale * (dist / pinchStartDist), MIN_SCALE, MAX_SCALE)
+    panX = cx - (cx - panX) * (newScale / scale)
+    panY = cy - (cy - panY) * (newScale / scale)
+    scale = newScale
+    targetScale = newScale
+    clampPan()
+    targetPanX = panX
+    targetPanY = panY
+    applyTransform()
+    return
+  }
+
   if (!cachedRootRect || !cachedGridRect) refreshRects()
 
   updateDriftTarget(event.clientX - cachedRootRect.left, event.clientY - cachedRootRect.top)
@@ -680,7 +749,10 @@ function handleMouseMove(event) {
   ensureTicking()
 }
 
-function handleMouseLeave() {
+function handlePointerLeave(event) {
+  // 터치는 손가락을 떼면 pointerup/pointercancel이 함께 오므로 endPointer가 이미 정리한다.
+  // 마우스가 지도 밖으로 나가는 경우만 별도로 "마지막 활성 칸" 기억을 지워준다.
+  if (event.pointerType !== 'mouse') return
   lastActiveCol = null
   lastActiveRow = null
 }
@@ -713,15 +785,17 @@ onMounted(() => {
   resizeObserver = new ResizeObserver(handleResize)
   resizeObserver.observe(rootRef.value)
   rootRef.value.addEventListener('wheel', handleWheel, { passive: false })
-  // 버튼을 지도 바깥에서 떼는 경우까지 잡기 위해 mouseup은 window에 건다(mousedown/move는
-  // 지도 안에서만 의미가 있어 템플릿에 직접 바인딩한다).
-  window.addEventListener('mouseup', handleMouseUp)
+  // 손가락/버튼을 지도 바깥에서 떼는 경우까지 잡기 위해 pointerup/cancel은 window에 건다
+  // (pointerdown/move는 지도 안에서만 의미가 있어 템플릿에 직접 바인딩한다).
+  window.addEventListener('pointerup', endPointer)
+  window.addEventListener('pointercancel', endPointer)
 })
 
 onUnmounted(() => {
   resizeObserver?.disconnect()
   rootRef.value?.removeEventListener('wheel', handleWheel)
-  window.removeEventListener('mouseup', handleMouseUp)
+  window.removeEventListener('pointerup', endPointer)
+  window.removeEventListener('pointercancel', endPointer)
   if (rafId) cancelAnimationFrame(rafId)
   clearTimeout(comboFlashTimeoutId)
   clearTimeout(shakeTimeoutId)
@@ -877,9 +951,9 @@ function handleDotHover(dot, event) {
       'is-combo-flashing': isComboFlashing,
       'is-game-over-shaking': isGameOverShaking,
     }"
-    @mousedown="handleMouseDown"
-    @mousemove="handleMouseMove"
-    @mouseleave="handleMouseLeave"
+    @pointerdown="handlePointerDown"
+    @pointermove="handlePointerMove"
+    @pointerleave="handlePointerLeave"
   >
     <div ref="viewportRef" class="korea-map__viewport">
       <div
@@ -910,8 +984,8 @@ function handleDotHover(dot, event) {
                 }
               : undefined
           "
-          @mouseenter="(dot.city || dot.landmark) && !gameActive && handleDotHover(dot, $event)"
-          @mouseleave="hoveredDot = null"
+          @pointerenter="(dot.city || dot.landmark) && !gameActive && handleDotHover(dot, $event)"
+          @pointerleave="hoveredDot = null"
           @click="handleDotClick(dot, $event)"
         />
       </div>
@@ -932,6 +1006,9 @@ function handleDotHover(dot, event) {
   position: absolute;
   inset: 0;
   overflow: hidden;
+  /* 터치 드래그/핀치가 브라우저 기본 스크롤·확대로 새어나가지 않게 한다 — 줌·팬·파동은
+     이 컴포넌트가 pointer 이벤트로 직접 처리한다. */
+  touch-action: none;
 }
 
 /* "한반도 지역 찾기" 게임 진행 중에는 지도 전체가 클릭 가능한 게임판임을 커서로 알린다. */

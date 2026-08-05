@@ -113,6 +113,7 @@ const html = computed(() => marked.parse(guideRaw))
 
 .study-guide__body :deep(a) {
   color: var(--amber);
+  overflow-wrap: anywhere;
 }
 
 .study-guide__body :deep(hr) {
@@ -140,8 +141,12 @@ const html = computed(() => marked.parse(guideRaw))
   color: var(--amber);
 }
 
+/* 표가 카드 폭보다 넓어지면 페이지 전체가 가로로 밀리던 문제 — 표 자체를 블록으로 감싸
+   가로 스크롤을 표 안으로만 가두고, 카드는 항상 화면 폭 안에 머물게 한다. */
 .study-guide__body :deep(table) {
+  display: block;
   width: 100%;
+  overflow-x: auto;
   border-collapse: collapse;
   margin: 16px 0;
   font-size: 13px;
@@ -172,6 +177,7 @@ const html = computed(() => marked.parse(guideRaw))
   padding: 1px 6px;
   border-radius: 4px;
   font-size: 13px;
+  overflow-wrap: anywhere;
 }
 
 .study-guide__body :deep(pre) {

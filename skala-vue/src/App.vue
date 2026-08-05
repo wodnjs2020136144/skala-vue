@@ -15,6 +15,21 @@ const searchStore = useSearchStore()
 const favoritesStore = useFavoritesStore()
 const demoStore = useDemoStore()
 
+// nav 실제 높이를 CSS 변수로 노출한다. 모바일에서는 즐겨찾기 칩이 줄바꿈되며 nav 높이가
+// 늘어날 수 있는데(App.vue의 반응형 대응), 지도 화면(WeatherMapView.vue)이 "100vh - nav 높이"로
+// 자기 높이를 계산하므로 하드코딩된 상수 대신 이 변수를 참조하게 한다.
+const navRef = ref(null)
+let navResizeObserver = null
+
+onMounted(() => {
+  if (!navRef.value) return
+  navResizeObserver = new ResizeObserver(([entry]) => {
+    document.documentElement.style.setProperty('--nav-h', `${Math.round(entry.contentRect.height)}px`)
+  })
+  navResizeObserver.observe(navRef.value)
+})
+onUnmounted(() => navResizeObserver?.disconnect())
+
 // 즐겨찾기 칩은 이름만 보여주면 되므로, 날씨 API를 다시 부르지 않고 정적 메타데이터에서 찾는다.
 const favoriteCities = computed(() =>
   CITY_LIST.filter((city) => favoritesStore.isFavorite(city.id)),
@@ -48,7 +63,7 @@ onUnmounted(() => document.removeEventListener('click', handleOutsideClick))
 </script>
 
 <template>
-  <nav class="app-nav">
+  <nav ref="navRef" class="app-nav">
     <div class="app-nav__links">
       <RouterLink to="/" class="app-nav__link">날씨</RouterLink>
       <RouterLink to="/map" class="app-nav__link">지도</RouterLink>
@@ -201,5 +216,41 @@ onUnmounted(() => document.removeEventListener('click', handleOutsideClick))
 .app-nav__search {
   flex: 0 1 220px;
   margin-left: auto;
+}
+
+/* ≤640px: 모바일. nav를 세로로 쌓고, 즐겨찾기 칩은 줄바꿈 대신 가로 스크롤로 눌러
+   nav 높이가 즐겨찾기 개수(최대 17개)에 따라 커지지 않게 한다. */
+@media (max-width: 640px) {
+  .app-nav {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .app-nav__favorites {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+
+  .app-nav__favorite-chip {
+    flex-shrink: 0;
+  }
+
+  .app-nav__search {
+    margin-left: 0;
+    flex: 1 1 auto;
+    width: 100%;
+  }
+
+  /* 우측 끝 칩에서 열어도 메뉴가 화면 밖으로 나가지 않도록, 앵커 대신 화면 폭에 맞춘
+     고정 팝업으로 바꾼다. */
+  .app-nav__favorite-menu {
+    position: fixed;
+    left: 16px;
+    right: 16px;
+    top: auto;
+    min-width: 0;
+  }
 }
 </style>

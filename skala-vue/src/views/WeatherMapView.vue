@@ -121,6 +121,14 @@ const GAME_WINDOW_WIDTH_ESTIMATE = 240
 const infoWindowDrag = useDraggable({ x: 16, y: WINDOW_TOP_OFFSET })
 const gameWindowDrag = useDraggable({ x: 16, y: WINDOW_TOP_OFFSET })
 
+// ≤1000px(태블릿·모바일)에서는 정보창·게임창이 드래그 창 대신 화면 하단 접이식 시트로
+// 바뀐다(CSS 미디어 쿼리, 아래 style). 좁은 화면에서 둘 다 펼치면 지도를 거의 다 가리므로
+// 한 번에 하나만 열리게 관리한다. 넓은 화면에서는 이 값과 무관하게 항상 둘 다 보인다.
+const mobileSheet = ref(null) // null | 'info' | 'game'
+function toggleMobileSheet(name) {
+  mobileSheet.value = mobileSheet.value === name ? null : name
+}
+
 const POPUP_MARGIN = 12
 // 실측 크기가 화면보다 커서 팝업을 통째로 축소해야 할 때, 글씨를 읽을 수 있는 최소 배율.
 const MIN_FIT_SCALE = 0.7
@@ -195,6 +203,7 @@ const game = useRegionGame()
 
 function startGame() {
   closePopup() // 게임 중엔 날씨 팝업이 화면을 가리지 않도록 미리 닫는다.
+  mobileSheet.value = 'game' // 좁은 화면에서 게임을 시작하면 게임 시트를 자동으로 연다.
   game.startGame()
 }
 
@@ -289,9 +298,10 @@ const isNight = computed(() => {
             :game-active="game.status.value === 'playing'" @select-city="selectCity" @map-pick="handleMapPick" />
         </div>
 
-        <!-- 정보창: 즐겨찾기 + 오늘의 순위를 한 창에 통합. 드래그하려면 헤더를 잡고 끈다. -->
-        <div class="map-window map-window--info" data-draggable-window
-          :style="{ left: `${infoWindowDrag.position.value.x}px`, top: `${infoWindowDrag.position.value.y}px` }">
+        <!-- 정보창: 즐겨찾기 + 오늘의 순위를 한 창에 통합. 넓은 화면에서는 헤더를 잡고 끄는
+             드래그 창, ≤1000px에서는 하단 탭으로 여닫는 시트로 바뀐다(CSS). -->
+        <div class="map-window map-window--info" data-draggable-window :class="{ 'is-sheet-open': mobileSheet === 'info' }"
+          :style="{ '--win-x': `${infoWindowDrag.position.value.x}px`, '--win-y': `${infoWindowDrag.position.value.y}px` }">
           <div class="map-window__header" @pointerdown="infoWindowDrag.startDrag">
             <FavoriteHeartDots :active="true" :size="14" />
             <span>즐겨찾기 · 오늘의 순위</span>
@@ -343,8 +353,8 @@ const isNight = computed(() => {
         </div>
 
         <!-- 게임창: 한반도 지역 찾기. 게임 시작을 누르면 지도 자체가 게임판이 된다. -->
-        <div class="map-window map-window--game" data-draggable-window
-          :style="{ left: `${gameWindowDrag.position.value.x}px`, top: `${gameWindowDrag.position.value.y}px` }">
+        <div class="map-window map-window--game" data-draggable-window :class="{ 'is-sheet-open': mobileSheet === 'game' }"
+          :style="{ '--win-x': `${gameWindowDrag.position.value.x}px`, '--win-y': `${gameWindowDrag.position.value.y}px` }">
           <div class="map-window__header" @pointerdown="gameWindowDrag.startDrag">
             <span>한반도 지역 찾기</span>
           </div>
@@ -391,6 +401,18 @@ const isNight = computed(() => {
             </template>
           </div>
         </div>
+
+        <!-- ≤1000px 전용 하단 탭바 — 정보창·게임창을 시트로 여닫는다. 넓은 화면에서는 CSS로 숨긴다. -->
+        <div class="mobile-sheet-tabs">
+          <button class="mobile-sheet-tabs__btn" :class="{ 'is-active': mobileSheet === 'info' }"
+            @click="toggleMobileSheet('info')">
+            정보
+          </button>
+          <button class="mobile-sheet-tabs__btn" :class="{ 'is-active': mobileSheet === 'game' }"
+            @click="toggleMobileSheet('game')">
+            게임
+          </button>
+        </div>
       </div>
 
       <Transition name="popup">
@@ -430,7 +452,10 @@ const isNight = computed(() => {
 .weather-map {
   display: flex;
   flex-direction: column;
-  min-height: calc(100vh - 57px);
+  /* --nav-h는 App.vue가 nav 실제 높이를 ResizeObserver로 재서 넣어준다(모바일에서 nav가
+     줄바꿈돼 높이가 늘어나도 이 값을 그대로 따라간다). 57px는 그 값이 아직 안 잡혔을 때의
+     대체값(초기 nav 높이와 동일). 100dvh로 모바일 주소창에 따른 높이 변화도 반영한다. */
+  min-height: calc(100dvh - var(--nav-h, 57px));
   margin: 0;
   padding: 0;
   background-color: var(--sea);
@@ -462,9 +487,11 @@ const isNight = computed(() => {
    보다는 낮게 둬서 팝업이 항상 그 위에 보인다. */
 .map-window {
   position: fixed;
+  left: var(--win-x);
+  top: var(--win-y);
   z-index: 10;
   width: 220px;
-  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
   display: flex;
   flex-direction: column;
   background: var(--paper);
@@ -582,7 +609,7 @@ const isNight = computed(() => {
 
 .fav-compare__row {
   display: grid;
-  grid-template-columns: 1fr 34px 34px 40px;
+  grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(28px, 0.6fr));
   align-items: center;
   gap: 4px;
   border: none;
@@ -711,10 +738,71 @@ const isNight = computed(() => {
   font-weight: 600;
 }
 
-/* 좁은 화면에서는 지도가 눌리지 않도록 정보창·게임창을 숨긴다 */
+.mobile-sheet-tabs {
+  display: none;
+}
+
+/* ≤1000px(태블릿·모바일): 정보창·게임창을 드래그 창 대신 화면 하단 접이식 시트로 바꾼다.
+   position은 그대로 fixed지만 좌표를 JS 드래그 값(--win-x/--win-y) 대신 이 미디어 쿼리가
+   직접 지정해 화면 폭에 맞춘다 — 인라인 style이 아니라 CSS 변수를 거치게 해둔 덕에
+   여기서 자연스럽게 override된다. 시트는 한 번에 하나만(.is-sheet-open) 펼쳐진다. */
 @media (max-width: 1000px) {
-  .map-window {
-    display: none;
+  .map-window--info,
+  .map-window--game {
+    left: 0;
+    top: auto;
+    right: 0;
+    bottom: 56px;
+    width: 100%;
+    max-width: 100%;
+    max-height: 55dvh;
+    border-radius: 16px 16px 0 0;
+    transform: translateY(100%);
+    transition: transform 0.25s ease;
+    z-index: 15;
+  }
+
+  .map-window--info.is-sheet-open,
+  .map-window--game.is-sheet-open {
+    transform: translateY(0);
+  }
+
+  /* 시트 상태에서는 드래그로 옮길 수 없으므로 손잡이 커서를 보통 헤더처럼 되돌린다. */
+  .map-window--info .map-window__header,
+  .map-window--game .map-window__header {
+    cursor: default;
+  }
+
+  .weather-map__body {
+    /* 하단 탭바(56px)만큼 지도 아래 여백을 둬 제주 등 남쪽 도트가 탭바에 가리지 않게 한다. */
+    padding-bottom: 56px;
+  }
+
+  .mobile-sheet-tabs {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 16;
+    display: flex;
+    height: 56px;
+    background: var(--ink);
+    border-top: 2px solid var(--amber);
+  }
+
+  .mobile-sheet-tabs__btn {
+    flex: 1;
+    border: none;
+    background: none;
+    color: var(--paper);
+    font-family: var(--font-pixel-kr);
+    font-size: 13px;
+    letter-spacing: 0.05em;
+    cursor: pointer;
+  }
+
+  .mobile-sheet-tabs__btn.is-active {
+    color: var(--amber);
   }
 }
 

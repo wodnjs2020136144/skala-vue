@@ -2025,6 +2025,150 @@ export const CITY_LIST = [
 
 ---
 
+## 29. 모바일/태블릿 반응형 전체 대응
+
+**요구사항**
+- 지금까지 PC 화면 기준으로만 만들어온 앱이 모바일·태블릿에서도 모든 기능(특히 지도 탭의 게임)이 동작하도록 만든다.
+
+**사고 과정**
+- 조사해보니 전체 소스에 `@media` 쿼리가 3개뿐이었고, 그중 하나가 `WeatherMapView.vue`에서 **1000px 이하일 때 지도 탭의 정보창·게임창을 통째로 `display:none`** 시키고 있었다 — 태블릿 세로부터 게임 자체에 접근할 수 없는 구조였다. 지도 인터랙션도 `mousedown`/`mousemove`/`mouseenter` 등 마우스 전용 이벤트라 터치에서 파동·프레스·툴팁이 전부 죽어 있었다.
+- 그 밖에 전역 CSS 리셋이 없어 `body` 기본 margin 8px가 살아있는 점, `calc(100vh - 57px)`로 nav 높이를 하드코딩해 nav가 줄바꿈되는 순간 지도 높이 계산이 어긋나는 점, 한반도 도트 그리드가 `DOT_PX=16` 고정이라 화면이 낮으면 위/아래가 잘리는 점을 함께 확인했다.
+- 큰 변경이라 "전역 리셋 → nav → 지도 높이 계산 → 지도 터치 인터랙션 → 게임창/정보창 → 나머지 화면 잔손질" 순서로 단계를 나눠 진행했다.
+
+**해결 과정**
+1. 전역 리셋 추가.
+
+#### 파일 경로: `src/assets/retro-theme.css`
+```css
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-mono);
+}
+```
+
+2. nav 실제 높이를 `ResizeObserver`로 재서 `--nav-h` CSS 변수로 노출하고(모바일에서 nav가 줄바꿈돼도 이 값이 항상 정확함), ≤640px에서 nav를 세로 스택 + 즐겨찾기 칩 가로 스크롤로 바꿨다.
+
+#### 파일 경로: `src/App.vue`
+```js
+const navRef = ref(null)
+let navResizeObserver = null
+
+onMounted(() => {
+  if (!navRef.value) return
+  navResizeObserver = new ResizeObserver(([entry]) => {
+    document.documentElement.style.setProperty('--nav-h', `${Math.round(entry.contentRect.height)}px`)
+  })
+  navResizeObserver.observe(navRef.value)
+})
+onUnmounted(() => navResizeObserver?.disconnect())
+```
+```css
+@media (max-width: 640px) {
+  .app-nav { flex-direction: column; align-items: stretch; gap: 10px; }
+  .app-nav__favorites { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; }
+  .app-nav__favorite-chip { flex-shrink: 0; }
+  .app-nav__search { margin-left: 0; flex: 1 1 auto; width: 100%; }
+  .app-nav__favorite-menu { position: fixed; left: 16px; right: 16px; top: auto; min-width: 0; }
+}
+```
+
+3. 지도 뷰의 높이 계산에서 하드코딩된 `57px`를 `--nav-h` 변수로 바꾸고 `100vh`도 `100dvh`로 바꿨다. 정보창·게임창의 위치도 인라인 `left/top` 대신 CSS 변수(`--win-x`/`--win-y`)를 거치게 바꿔, ≤1000px 미디어 쿼리가 인라인 스타일에 밀리지 않고 위치를 직접 override할 수 있게 했다. 그 위에 **정보창·게임창을 숨기던 미디어 쿼리를 삭제**하고, 대신 화면 하단 접이식 시트(탭 두 개, 한 번에 하나만 펼침, 게임 시작 시 자동으로 게임 시트가 열림)로 바꿨다.
+
+#### 파일 경로: `src/views/WeatherMapView.vue`
+```css
+.weather-map {
+  min-height: calc(100dvh - var(--nav-h, 57px));
+  ...
+}
+.map-window {
+  position: fixed;
+  left: var(--win-x);
+  top: var(--win-y);
+  ...
+}
+@media (max-width: 1000px) {
+  .map-window--info,
+  .map-window--game {
+    left: 0; top: auto; right: 0; bottom: 56px;
+    width: 100%; max-width: 100%; max-height: 55dvh;
+    border-radius: 16px 16px 0 0;
+    transform: translateY(100%);
+    transition: transform 0.25s ease;
+  }
+  .map-window--info.is-sheet-open,
+  .map-window--game.is-sheet-open {
+    transform: translateY(0);
+  }
+  .mobile-sheet-tabs {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    display: flex; height: 56px;
+    background: var(--ink); border-top: 2px solid var(--amber);
+  }
+}
+```
+```js
+const mobileSheet = ref(null) // null | 'info' | 'game'
+function toggleMobileSheet(name) {
+  mobileSheet.value = mobileSheet.value === name ? null : name
+}
+function startGame() {
+  closePopup()
+  mobileSheet.value = 'game' // 좁은 화면에서 게임을 시작하면 게임 시트를 자동으로 연다.
+  game.startGame()
+}
+```
+
+4. 지도의 마우스 전용 이벤트를 전부 pointer 이벤트로 바꾸고, 두 손가락 핀치 줌과 `touch-action:none`을 추가했다. 도트 크기(`DOT_PX`)도 컨테이너 높이에 따라 6~16px로 가변화해, 화면이 낮아도 41행(한반도 세로) 전체가 들어가게 했다.
+
+#### 파일 경로: `src/components/practices/weather/KoreaMapDots.vue`
+```js
+function computeDotPx(height) {
+  return Math.max(DOT_PX_MIN, Math.min(DOT_PX_MAX, Math.floor(height / (GRID_H + 4))))
+}
+
+function handlePointerMove(event) {
+  ...
+  if (activePointers.size === 2 && pinchStartDist > 0) {
+    // 두 손가락 사이 거리 변화를 배율로, 중점을 wheel 줌과 같은 방식으로
+    // "그 지점이 확대/축소 후에도 그대로 머무는" 기준점으로 삼는다.
+    const newScale = clamp(pinchStartScale * (dist / pinchStartDist), MIN_SCALE, MAX_SCALE)
+    panX = cx - (cx - panX) * (newScale / scale)
+    panY = cy - (cy - panY) * (newScale / scale)
+    ...
+  }
+  ...
+}
+```
+```css
+.korea-map {
+  touch-action: none;
+}
+```
+
+5. 나머지 화면 잔손질: `StudyGuideView.vue`의 `v-html` 표가 넓으면 표 안에서만 가로 스크롤되게(`display:block; overflow-x:auto`), `DotMatrixIcon.vue`의 `--lg` 고정 260px를 `min(260px, 100%)` + `aspect-ratio:1`로, `BaseDashboardCard.vue`/`WeatherDetailView.vue`/`PracticesIndexView.vue`의 padding을 ≤640px에서 줄였다.
+
+**트러블슈팅**
+- 문제: 정보창·게임창의 위치를 원래 인라인 `:style="{ left, top }"`로 바인딩하고 있었는데, 이 상태에서 모바일 미디어 쿼리로 `left:0; bottom:...`을 주려 하면 인라인 스타일의 우선순위가 더 높아 무시됐다.
+- 해결: 위치를 인라인 `left`/`top` 대신 CSS 변수(`--win-x`/`--win-y`)로만 전달하고, 실제 `left`/`top` 선언은 스타일시트(desktop 기본값 + 모바일 미디어 쿼리)에 맡겼다. 이렇게 하면 인라인 스타일은 변수 값만 제공하고, 그 변수를 어떻게 쓸지는 CSS가 결정하므로 미디어 쿼리가 정상적으로 override된다.
+- 문제: 검증 중 좁은 화면(약 490px 높이)에서 도트 크기 하한을 8px로 뒀는데도 한반도 남쪽(제주)이 살짝 잘려 보였다.
+- 해결: 하단 탭바(56px)만큼의 여백까지 감안하면 8px로는 41행이 다 안 들어가는 경우가 있어, 하한을 6px로 낮춰 더 낮은 화면에서도 전체가 들어가게 했다.
+
+**결과**
+- `npm run lint`(기존 무관 오류 1건 제외)·`npx vite build` 통과.
+- Chrome 확장으로 1440×900/768×1024/375×667(도구 제약으로 실제로는 약 500×490) 세 폭에서 확인: 데스크톱은 기존과 동일하게 드래그 창으로 정보/게임창이 뜨고 게임 플레이 정상. 태블릿(768×1024)에서 하단 탭바가 나타나고 "게임" 탭으로 시트를 열어 실제로 게임을 시작해 지역을 클릭해 정답 처리까지 확인, 페이지 전체 가로 스크롤 없음. 좁은 화면에서도 nav 세로 스택, 하단 시트 개폐, 표 가로 스크롤이 표 안에만 갇히는 것 확인. 모든 폭에서 콘솔 에러 없음.
+
+**느낀점**
+- "반응형 대응"이 없는 채로 오래 방치된 코드는 인라인 스타일 하나가 CSS 미디어 쿼리를 통째로 무력화하는 식으로, 뒤늦게 손대려 할 때 예상 못 한 지점에서 막힌다는 걸 겪었다 — 처음부터 위치 같은 동적 값을 CSS 변수로 빼두면 나중에 반응형을 얹기 훨씬 쉬웠겠다는 교훈을 얻었다.
+- 마우스 이벤트만으로 개발하고 "나중에 모바일 대응하지"라고 미루면, 실제로 되돌아왔을 때 이벤트 체계 자체(mouse* → pointer*)를 다 바꿔야 해서 생각보다 손이 많이 간다 — 처음부터 pointer 이벤트로 통일해두는 편이 결국 더 적은 작업이었을 것 같다.
+
+---
+
 <!--
 아래 형식을 복사해서 작업 단위마다 항목을 추가합니다.
 

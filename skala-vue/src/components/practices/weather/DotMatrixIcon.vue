@@ -473,8 +473,10 @@ onUnmounted(() => {
 }
 
 .dot-matrix--lg {
-  width: 260px;
-  height: 260px;
+  /* 컨테이너가 260px보다 좁으면(좁은 화면의 상세 페이지 등) 정사각형을 유지하며 줄어든다. */
+  width: min(260px, 100%);
+  aspect-ratio: 1;
+  height: auto;
 }
 
 .dot-matrix--md {

@@ -28,4 +28,10 @@
 .dashboard-card__list {
   margin-top: 20px;
 }
+
+@media (max-width: 640px) {
+  .dashboard-card {
+    padding: 18px;
+  }
+}
 </style>

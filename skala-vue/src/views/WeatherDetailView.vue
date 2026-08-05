@@ -150,4 +150,14 @@ const displayTemp = computed(() => {
 .status-message--error {
   color: var(--amber);
 }
+
+@media (max-width: 640px) {
+  .weather-detail {
+    padding: 18px;
+  }
+
+  .weather-detail__card {
+    padding: 18px;
+  }
+}
 </style>
