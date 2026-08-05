@@ -1850,6 +1850,56 @@
 
 ---
 
+## 26. 상세 페이지 데모 모드 버그 수정 + 창문 일러스트 리디자인 + 렌더링 최적화 조사
+
+**요구사항**
+1. 데모 데이터 보기 상태에서도 날씨 탭 상세 정보가 항상 실제 API 값으로 나오는 버그 수정 — 데모 모드에서는 데모 데이터가 나오도록.
+2. 참고 이미지(어두운 카드, 창문 밖 도시 풍경, 고양이 실루엣)를 참고해 상세 페이지 레이아웃 리디자인.
+3. 렌더링에서 더 최적화 가능한 부분을 찾아 방안 제시(이번 라운드는 조사·제시까지만, 사용자가 "제시해줘"라고 명시).
+
+**사고 과정**
+- 버그는 코드를 보자마자 바로 원인이 드러났다 — `WeatherDetailView.vue`의 `loadDetail()`만 홈/지도 화면과 달리 `demoStore.useDummyData` 분기가 아예 없이 항상 `fetchCurrentWeather`를 호출하고 있었다. 홈 카드와 데모 조건을 맞추려면 `getDummyWeather(city, index)`의 `index`를 `CITY_LIST`에서의 실제 순서로 넘겨야 한다는 것도 함께 확인했다(안 맞추면 상세 페이지만 다른 조건의 데모 데이터를 보여줘서 또 다른 불일치가 생긴다).
+- 레이아웃은 참고 이미지를 그대로 재현(사진 같은 일러스트)하기보다 이 앱의 기존 픽셀/레트로 디자인 언어로 재해석하는 방향을 잡았다. 특히 3번 요구사항(렌더링 최적화)과 정면으로 배치되지 않도록, 처음부터 "프레임마다 다시 계산하는 애니메이션 그리드"가 아니라 CSS 그라디언트·clip-path 몇 개로 구성된 완전히 정적인 장면으로 설계했다 — 만들면서 최적화 문제를 새로 만들지 않기 위함이었다.
+- 하늘 그라디언트를 조건×낮/밤 조합(6×2=12종)으로 전부 따로 만들지 않고, 조건별 낮 그라디언트 6종만 정의한 뒤 밤에는 반투명 오버레이 하나로 톤을 낮추는 방식을 택했다 — 코드량도 적고, 오버레이 하나 추가하는 것뿐이라 렌더 비용도 거의 없다.
+- `WeatherStatsPanel.vue`를 다크 카드 안에 그대로 재사용하려니, 이 컴포넌트가 내부적으로 쓰는 `DotStatBar`가 `--ink`(수치 글자색)를 직접 참조하고 있어 다크 배경 위에서 배경과 같은 색이 되어 안 보이는 문제가 있었다. `:deep()` 선택자로 자식 컴포넌트 내부를 억지로 뚫는 대신, `--ink`/`--moss`/`--dot-off` 커스텀 프로퍼티 자체를 다크 서브트리에서만 재정의하는 방법을 택했다 — CSS 커스텀 프로퍼티 상속은 Vue의 `scoped` 속성(선택자만 격리)과 무관하게 정상적으로 자식에게 흘러가므로, `DotStatBar.vue`를 전혀 수정하지 않고도 해결됐다.
+- 렌더링 최적화 조사는 이번 세션 초반 `KoreaMapDots.vue`에서 이미 겪고 고쳤던 것과 똑같은 유형의 문제를 `DotMatrixIcon.vue`에서 발견했다 — 36×36=1296개 도트를 `v-for`로 그리는데, 비/눈/안개 애니메이션이 80ms마다 `computed`로 배열 전체를 새로 만들어 Vue가 1296개를 통째로 다시 diff한다. 실제로 움직이는 방울/눈송이는 몇 개뿐인데 비용은 그리드 전체 크기에 비례한다 — 이미 검증된 해법(캐시된 DOM 참조 + 바뀐 칸만 `style.setProperty`)을 그대로 적용할 수 있다고 판단했다.
+
+**해결 과정**
+1. `src/views/WeatherDetailView.vue`: `useDemoStore`·`getDummyWeather`·`CITY_LIST` import, `loadDetail()`에 데모 분기 추가, `watch(() => demoStore.useDummyData, loadDetail)` 추가.
+
+   #### `src/views/WeatherDetailView.vue`
+   ```js
+   if (demoStore.useDummyData) {
+     const index = CITY_LIST.findIndex((c) => c.id === city.id)
+     weather.value = getDummyWeather(city, index)
+   } else {
+     weather.value = await fetchCurrentWeather(city)
+   }
+   ```
+2. `src/components/practices/weather/WeatherWindowScene.vue`(신규): 블라인드(반복 그라디언트) + 조건별 하늘 그라디언트 + 해/달 + 스카이라인(`clip-path` 다각형) + 고양이 실루엣(테두리 box-shadow로 배경과 구분)으로 구성한 완전 정적 일러스트.
+3. `src/components/practices/weather/WeatherStatsPanel.vue`: `dark` prop 추가, dark일 때 내부 `DotMatrixIcon`+상태 텍스트 헤더(부모가 이미 보여주므로 중복) 생략, `--ink`/`--moss`/`--dot-off` 커스텀 프로퍼티 재정의로 다크 톤 대응.
+4. `src/views/WeatherDetailView.vue` 템플릿을 어두운 카드(`--ink` 배경) + 큰 온도 + 상태 텍스트 + `WeatherWindowScene` + `WeatherStatsPanel(dark)` 순서로 재구성.
+5. Chrome 확장으로 확인: 데모 토글을 켜면 즉시(새로고침 없이) "맑음 (데모)"·28℃로 바뀌고 하늘도 낮 그라디언트로 반응함을 확인. 처음엔 고양이 실루엣이 스카이라인과 같은 색이라 안 보이는 문제를 발견해 테두리 box-shadow를 추가해 고쳤다. `DotMatrixIcon` 중복 표시 문제도 발견해 `dark` 모드에서 헤더 블록을 생략하도록 고쳤다.
+6. `npm run lint`·`npx vite build` 통과 확인.
+
+**트러블슈팅**
+- 문제: 고양이 실루렛과 도시 스카이라인이 똑같은 색(`#14141c`)이라 겹치는 위치에서는 완전히 안 보였다.
+- 해결: 몸통·귀에 은은한 흰색 테두리(`box-shadow`/`drop-shadow`)를 둘러, 배경과 같은 색이어도 윤곽선만으로 구분되게 했다.
+- 문제: `WeatherWindowScene`을 추가한 뒤에도 그 아래 `WeatherStatsPanel`이 자체적으로 큰 애니메이션 구름 아이콘과 상태 텍스트를 또 그려서, 같은 정보(날씨 상태)가 화면에 두 번 나왔다.
+- 해결: `WeatherStatsPanel.vue`에 `dark` prop을 하나 더 만들어, dark일 때는 그 헤더 블록(아이콘+상태 텍스트)을 아예 생략하도록 `v-if`로 걸었다.
+
+**결과**
+- `npm run lint`(기존 무관 오류 1건 제외)·`npx vite build` 통과.
+- Chrome 확장으로 데모/실제 모드 전환, 다크 카드 가독성, 고양이 실루엣, 조건별 하늘 색 전부 정상 확인. 콘솔 에러 없음.
+- 렌더링 최적화 조사 결과(3번)는 구현하지 않고 아래 "느낀점" 다음에 별도로 정리해 최종 응답으로 제시했다 — 핵심은 `DotMatrixIcon.vue`가 `KoreaMapDots.vue`에서 이미 고친 것과 같은 유형의 문제(애니메이션 프레임마다 큰 그리드를 Vue 반응형으로 통째로 재렌더링)를 갖고 있다는 것.
+
+**느낀점**
+- 새 UI를 추가할 때 "기존 컴포넌트가 이미 하고 있던 일과 겹치지 않는지"를 실제로 렌더링해보기 전까지는 알기 어려웠다 — `WeatherStatsPanel`이 자체 헤더를 갖고 있다는 걸 알고 있었는데도, 새로 배치하고 나서야 중복이 눈에 보였다.
+- CSS 커스텀 프로퍼티는 Vue의 `scoped` 스타일 격리를 우회해서 자식 컴포넌트 내부까지 자연스럽게 스며든다는 걸 실전에서 활용해봤다 — `:deep()`으로 자식의 선택자를 억지로 뚫는 것보다,애초에 자식이 참조하는 "값"(커스텀 프로퍼티)을 부모 스코프에서 재정의하는 편이 훨씬 적은 코드로, 자식 컴포넌트를 전혀 건드리지 않고 테마를 바꿀 수 있었다.
+- 이미 한 번 고쳐본 성능 문제(애니메이션 그리드의 Vue 반응형 재렌더링)는 다른 컴포넌트에서도 같은 패턴으로 나타날 수 있다는 걸 확인했다 — 한 곳을 제대로 고쳐두면, 비슷한 코드를 다른 데서 발견했을 때 원인 진단과 해법 제시가 훨씬 빨라진다.
+
+---
+
 <!--
 아래 형식을 복사해서 작업 단위마다 항목을 추가합니다.
 

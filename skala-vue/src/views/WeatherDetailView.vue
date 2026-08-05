@@ -3,8 +3,10 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElSkeleton } from 'element-plus'
 import { useConfigStore } from '../stores/configStore'
-import { findCityById, fetchCurrentWeather } from '../services/weatherApi'
+import { useDemoStore } from '../stores/demoStore'
+import { CITY_LIST, findCityById, fetchCurrentWeather, getDummyWeather } from '../services/weatherApi'
 import WeatherStatsPanel from '../components/practices/weather/WeatherStatsPanel.vue'
+import WeatherWindowScene from '../components/practices/weather/WeatherWindowScene.vue'
 import UnitToggler from '../components/UnitToggler.vue'
 
 const props = defineProps({
@@ -16,6 +18,7 @@ const props = defineProps({
 
 const router = useRouter()
 const configStore = useConfigStore()
+const demoStore = useDemoStore()
 
 const weather = ref(null)
 const isLoading = ref(true)
@@ -32,7 +35,16 @@ async function loadDetail() {
   isLoading.value = true
   loadError.value = ''
   try {
-    weather.value = await fetchCurrentWeather(city)
+    // 홈/지도 화면과 같은 분기 — 이게 빠져 있어서 "데모 데이터 보기"를 켜도 상세 페이지만
+    // 항상 실제 API 값을 보여주던 버그였다. index는 CITY_LIST 안에서의 실제 순서를 그대로
+    // 써서, 홈 카드에서 보던 것과 같은 도시가 데모 모드에서도 같은 조건(예: "맑음 (데모)")을
+    // 보이게 맞춘다.
+    if (demoStore.useDummyData) {
+      const index = CITY_LIST.findIndex((c) => c.id === city.id)
+      weather.value = getDummyWeather(city, index)
+    } else {
+      weather.value = await fetchCurrentWeather(city)
+    }
   } catch (err) {
     loadError.value = '날씨 정보를 불러오지 못했습니다. API Key와 네트워크 상태를 확인해 주세요.'
     console.error('[WeatherDetailView] 날씨 조회 실패:', err)
@@ -44,6 +56,8 @@ async function loadDetail() {
 onMounted(loadDetail)
 // 목록 → 다른 도시 상세로 바로 이동할 때(같은 컴포넌트 재사용)도 다시 불러오도록 id 변경을 감시
 watch(() => props.id, loadDetail)
+// 상세 페이지를 이미 연 채로 상단 "데모 데이터 보기" 토글을 눌러도 즉시 반영되게 한다.
+watch(() => demoStore.useDummyData, loadDetail)
 
 // 요구사항 스펙: Math.round((rawTemp * 9) / 5 + 32)
 const displayTemp = computed(() => {
@@ -68,8 +82,11 @@ const displayTemp = computed(() => {
         <UnitToggler />
       </div>
       <p class="weather-detail__temp">{{ displayTemp }}<span>{{ configStore.unitSymbol }}</span></p>
+      <p class="weather-detail__status">{{ weather.status }}</p>
 
-      <WeatherStatsPanel :city="weather" />
+      <WeatherWindowScene :condition="weather.condition" :sunrise="weather.sunrise" :sunset="weather.sunset" />
+
+      <WeatherStatsPanel :city="weather" dark />
     </div>
   </div>
 </template>
@@ -94,8 +111,10 @@ const displayTemp = computed(() => {
   letter-spacing: 0.05em;
 }
 
+/* 참고 이미지의 어두운 카드 톤 — nav bar·DotMatrixIcon 패널과 같은 --ink/--panel 팔레트를
+   그대로 재사용한 것이라 새 색을 추가하지 않았다. */
 .weather-detail__card {
-  background: var(--paper);
+  background: var(--ink);
   border-radius: 20px;
   padding: 24px;
   text-align: center;
@@ -113,21 +132,29 @@ const displayTemp = computed(() => {
   font-family: var(--font-pixel-kr);
   font-size: 20px;
   font-weight: 400;
-  color: var(--ink);
+  color: var(--paper);
   letter-spacing: 0.08em;
 }
 
 .weather-detail__temp {
-  margin: 8px 0 20px;
+  margin: 8px 0 0;
   font-family: var(--font-pixel);
   font-size: 56px;
   line-height: 1;
-  color: var(--ink);
+  color: var(--paper);
 }
 
 .weather-detail__temp span {
   font-size: 22px;
   vertical-align: top;
+}
+
+.weather-detail__status {
+  margin: 4px 0 20px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--dot-lit);
+  opacity: 0.8;
 }
 
 .status-message {
