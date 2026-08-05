@@ -16,13 +16,6 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
-  // 상세 페이지의 어두운 카드 위에 놓일 때 true — 내부 DotStatBar가 읽는 --ink/--moss/
-  // --dot-off 커스텀 프로퍼티를 이 서브트리에서만 밝은 값으로 재정의해 다크 배경에서도
-  // 읽히게 한다(자식 컴포넌트를 건드리지 않고 CSS 커스텀 프로퍼티 상속만으로 해결).
-  dark: {
-    type: Boolean,
-    default: false,
-  },
 })
 
 const configStore = useConfigStore()
@@ -89,16 +82,11 @@ function formatTime(unixSeconds) {
 </script>
 
 <template>
-  <div class="weather-stats-panel" :class="{ 'weather-stats-panel--compact': compact, 'weather-stats-panel--dark': dark }">
-    <!-- dark 모드(상세 페이지)에서는 부모가 이미 WeatherWindowScene으로 조건을 보여주고
-         상태 텍스트도 따로 띄우므로, 여기서 또 큰 DotMatrixIcon+상태 텍스트를 반복해서
-         보여주면 같은 정보가 두 번 겹친다 — dark일 때는 이 헤더 블록을 건너뛴다. -->
-    <template v-if="!dark">
-      <div class="weather-stats-panel__screen">
-        <DotMatrixIcon :condition="city.condition" :size="compact ? 'md' : 'lg'" :animated="true" />
-      </div>
-      <p class="weather-stats-panel__status">{{ city.status }}</p>
-    </template>
+  <div class="weather-stats-panel" :class="{ 'weather-stats-panel--compact': compact }">
+    <div class="weather-stats-panel__screen">
+      <DotMatrixIcon :condition="city.condition" :size="compact ? 'md' : 'lg'" :animated="true" />
+    </div>
+    <p class="weather-stats-panel__status">{{ city.status }}</p>
 
     <div class="weather-stats-panel__stats">
       <DotStatBar label="습도" :value="city.humidity" :display-value="`${city.humidity}%`" />
@@ -176,17 +164,6 @@ function formatTime(unixSeconds) {
 
 .weather-stats-panel--compact .weather-stats-panel__extra {
   margin-top: 10px;
-}
-
-/* 다크 카드용 — DotStatBar를 포함한 이 서브트리 전체가 읽는 --ink(수치 글자색)/--moss
-   (라벨색)/--dot-off(꺼진 도트색) 커스텀 프로퍼티를 밝은 값으로 재정의한다. scoped 속성은
-   선택자만 격리할 뿐 커스텀 프로퍼티 상속(캐스케이드)까지 막지 않으므로, 자식 컴포넌트인
-   DotStatBar를 전혀 건드리지 않고도 다크 배경에서 읽히게 만들 수 있다(원래 --ink는 밝은
-   배경 위 글자색이라, 어두운 카드 위에서는 배경과 같은 색이 되어 안 보였다). */
-.weather-stats-panel--dark {
-  --ink: var(--paper);
-  --moss: var(--dot-lit);
-  --dot-off: #3a3d40;
 }
 
 .weather-stats-panel__extra {

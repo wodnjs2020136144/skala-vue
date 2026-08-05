@@ -6,7 +6,6 @@ import { useConfigStore } from '../stores/configStore'
 import { useDemoStore } from '../stores/demoStore'
 import { CITY_LIST, findCityById, fetchCurrentWeather, getDummyWeather } from '../services/weatherApi'
 import WeatherStatsPanel from '../components/practices/weather/WeatherStatsPanel.vue'
-import WeatherWindowScene from '../components/practices/weather/WeatherWindowScene.vue'
 import UnitToggler from '../components/UnitToggler.vue'
 
 const props = defineProps({
@@ -82,11 +81,8 @@ const displayTemp = computed(() => {
         <UnitToggler />
       </div>
       <p class="weather-detail__temp">{{ displayTemp }}<span>{{ configStore.unitSymbol }}</span></p>
-      <p class="weather-detail__status">{{ weather.status }}</p>
 
-      <WeatherWindowScene :condition="weather.condition" :sunrise="weather.sunrise" :sunset="weather.sunset" />
-
-      <WeatherStatsPanel :city="weather" dark />
+      <WeatherStatsPanel :city="weather" />
     </div>
   </div>
 </template>
@@ -111,10 +107,8 @@ const displayTemp = computed(() => {
   letter-spacing: 0.05em;
 }
 
-/* 참고 이미지의 어두운 카드 톤 — nav bar·DotMatrixIcon 패널과 같은 --ink/--panel 팔레트를
-   그대로 재사용한 것이라 새 색을 추가하지 않았다. */
 .weather-detail__card {
-  background: var(--ink);
+  background: var(--paper);
   border-radius: 20px;
   padding: 24px;
   text-align: center;
@@ -132,29 +126,21 @@ const displayTemp = computed(() => {
   font-family: var(--font-pixel-kr);
   font-size: 20px;
   font-weight: 400;
-  color: var(--paper);
+  color: var(--ink);
   letter-spacing: 0.08em;
 }
 
 .weather-detail__temp {
-  margin: 8px 0 0;
+  margin: 8px 0 20px;
   font-family: var(--font-pixel);
   font-size: 56px;
   line-height: 1;
-  color: var(--paper);
+  color: var(--ink);
 }
 
 .weather-detail__temp span {
   font-size: 22px;
   vertical-align: top;
-}
-
-.weather-detail__status {
-  margin: 4px 0 20px;
-  font-family: var(--font-mono);
-  font-size: 13px;
-  color: var(--dot-lit);
-  opacity: 0.8;
 }
 
 .status-message {

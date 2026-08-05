@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 
 const props = defineProps({
   condition: {
@@ -22,9 +22,10 @@ const props = defineProps({
 
 // 도트 수를 늘려(18→36) 더 둥글고 세밀한 모양을 표현할 수 있게 한다.
 const GRID = 36
+const CELL_COUNT = GRID * GRID
 
 // 매 프레임 그대로 재사용하는 랜덤 지연값 — 옛날 LED판 특유의 "완벽하지 않은" 깜빡임 표현용.
-const JITTER = Array.from({ length: GRID * GRID }, () => Math.random() * 0.3)
+const JITTER = Array.from({ length: CELL_COUNT }, () => Math.random() * 0.3)
 
 function isInsideCircle(x, y, cx, cy, r) {
   const dx = x - cx
@@ -56,14 +57,14 @@ function pointSegmentDistance(px, py, x1, y1, x2, y2) {
 }
 
 function emptyDots() {
-  return Array.from({ length: GRID * GRID }, () => ({ lit: false, role: null }))
+  return Array.from({ length: CELL_COUNT }, () => ({ lit: false, role: null }))
 }
 
 // 해: 중심 원(노랑) + 8방향 광선(주황→빨강 그러데이션). 이 조합은 반응이 좋아 그대로 유지한다.
 function buildSun() {
   const center = GRID / 2
   const rayAngles = [0, 45, 90, 135, 180, 225, 270, 315]
-  return Array.from({ length: GRID * GRID }, (_, index) => {
+  return Array.from({ length: CELL_COUNT }, (_, index) => {
     const x = index % GRID
     const y = Math.floor(index / GRID)
     const dx = x - center
@@ -96,7 +97,7 @@ const CLOUD_PUFFS = [
   { cx: 28, cy: 15, r: 5 },
 ]
 function buildCloudBlob(color = '#c7d0d3') {
-  return Array.from({ length: GRID * GRID }, (_, index) => {
+  return Array.from({ length: CELL_COUNT }, (_, index) => {
     const x = index % GRID
     const y = Math.floor(index / GRID)
     const inCloud =
@@ -146,9 +147,11 @@ const RAIN_DROPS = Array.from({ length: 9 }, () => ({
   phase: Math.random() * 40,
   speed: 0.8 + Math.random() * 0.6,
 }))
-function buildRainFrame(frame) {
-  const dots = emptyDots()
-  const color = '#5b8fc7'
+const RAIN_COLOR = '#5b8fc7'
+// 비/눈/안개 공용 — 이 프레임에 켜지는 각 칸에 대해 apply(x, y, opacity, color)를 호출한다.
+// 반응형 배열을 만드는 buildXFrame(정적 렌더용)과, DOM에 직접 쓰는 imperative 루프
+// (애니메이션용) 양쪽에서 같은 계산 로직을 공유하기 위해 "무엇을 할지"만 콜백으로 뺐다.
+function computeRainFrame(frame, apply) {
   const totalRows = GRID + 8
   RAIN_DROPS.forEach(({ x, phase, speed }) => {
     const exact = ((frame * speed + phase) % totalRows) - 6
@@ -159,9 +162,13 @@ function buildRainFrame(frame) {
       [row + 1, frac],
     ].forEach(([cy, weight]) => {
       if (weight <= 0.02) return
-      RAINDROP_SHAPE.forEach(([ox, oy]) => applyDot(dots, x + ox, cy + oy, weight, color, 'drop'))
+      RAINDROP_SHAPE.forEach(([ox, oy]) => apply(x + ox, cy + oy, weight, RAIN_COLOR))
     })
   })
+}
+function buildRainFrame(frame) {
+  const dots = emptyDots()
+  computeRainFrame(frame, (x, y, opacity, color) => applyDot(dots, x, y, opacity, color, 'drop'))
   return dots
 }
 
@@ -204,9 +211,8 @@ const SNOW_FLAKE_SHAPE = [
   [1, -1],
   [-1, -1],
 ]
-function buildSnowFrame(frame) {
-  const dots = emptyDots()
-  const color = '#dcf0fa'
+const SNOW_COLOR = '#dcf0fa'
+function computeSnowFrame(frame, apply) {
   const totalRows = GRID + 4
   SNOW_FLAKES.forEach(({ x, phase, speed }) => {
     const exact = ((frame * speed + phase) % totalRows) - 2
@@ -219,11 +225,13 @@ function buildSnowFrame(frame) {
       [row + 1, frac],
     ].forEach(([cy, weight]) => {
       if (weight <= 0.02) return
-      SNOW_FLAKE_SHAPE.forEach(([ox, oy]) =>
-        applyDot(dots, cx + ox, cy + oy, weight, color, 'flake'),
-      )
+      SNOW_FLAKE_SHAPE.forEach(([ox, oy]) => apply(cx + ox, cy + oy, weight, SNOW_COLOR))
     })
   })
+}
+function buildSnowFrame(frame) {
+  const dots = emptyDots()
+  computeSnowFrame(frame, (x, y, opacity, color) => applyDot(dots, x, y, opacity, color, 'flake'))
   return dots
 }
 
@@ -290,9 +298,8 @@ const FOG_LAYERS = FOG_LAYER_ROWS.map((baseY, i) => {
   return { ellipses, phase: i * 14 + Math.random() * 8 }
 })
 const FOG_PERIOD = 60
-function buildFogFrame(frame) {
-  const dots = emptyDots()
-  const color = '#a7acae'
+const FOG_COLOR = '#a7acae'
+function computeFogFrame(frame, apply) {
   FOG_LAYERS.forEach((layer) => {
     const t = (frame + layer.phase) % FOG_PERIOD
     const opacity = Math.max(0, Math.sin((t / FOG_PERIOD) * Math.PI * 2))
@@ -302,12 +309,16 @@ function buildFogFrame(frame) {
       for (let y = 0; y < GRID; y++) {
         for (let x = 0; x < GRID; x++) {
           if (isInsideEllipse(x, y, e.cx + driftX, e.cy, e.rx, e.ry)) {
-            applyDot(dots, x, y, opacity, color, 'fog')
+            apply(x, y, opacity, FOG_COLOR)
           }
         }
       }
     })
   })
+}
+function buildFogFrame(frame) {
+  const dots = emptyDots()
+  computeFogFrame(frame, (x, y, opacity, color) => applyDot(dots, x, y, opacity, color, 'fog'))
   return dots
 }
 
@@ -316,31 +327,116 @@ const patternBuilders = {
   cloud: () => buildCloudBlob(),
   thunderstorm: buildThunderstorm,
 }
+// 프레임에 따라 매번 다시 계산해야 하는 조건 — 이 셋만 아래 imperative 애니메이션 루프의 대상이다.
+const FRAME_DRIVEN_CONDITIONS = new Set(['rain', 'snow', 'fog'])
 
-// 비/눈/안개는 시간(frame)에 따라 그리드를 매번 다시 계산하는 방식이라 setInterval로 프레임을 흘려보낸다.
-const frame = ref(0)
-let timer = null
-onMounted(() => {
-  if (props.animated) {
-    timer = setInterval(() => {
-      frame.value += 1
-    }, 80)
-  }
-})
-onUnmounted(() => {
-  if (timer) clearInterval(timer)
-})
-
+// dots는 이제 condition에만 의존한다(frame에는 의존하지 않는다) — 비/눈/안개도 항상 프레임 0
+// 기준의 "초기 정적 렌더"만 만들고, 실제 애니메이션은 아래 imperative 루프가 DOM에 직접
+// 써서 처리한다. 그 결과 setInterval이 돌아도 이 computed가 다시 실행되는 일이 아예 없다
+// (KoreaMapDots.vue에서 이미 검증한 것과 같은 최적화: 수백~천 개 넘는 요소를 Vue 반응형으로
+// 매 프레임 다시 diff하는 대신, 실제로 바뀌는 요소만 DOM에 직접 쓴다).
 const dots = computed(() => {
-  if (props.condition === 'rain') return buildRainFrame(frame.value)
-  if (props.condition === 'snow') return buildSnowFrame(frame.value)
-  if (props.condition === 'fog') return buildFogFrame(frame.value)
+  if (props.condition === 'rain') return buildRainFrame(0)
+  if (props.condition === 'snow') return buildSnowFrame(0)
+  if (props.condition === 'fog') return buildFogFrame(0)
   return (patternBuilders[props.condition] ?? patternBuilders.sun)()
+})
+
+// --- 애니메이션 imperative 루프 (비/눈/안개 + animated=true일 때만) ---
+const rootRef = ref(null)
+let dotElements = []
+async function refreshDotElements() {
+  await nextTick()
+  if (!rootRef.value) return
+  dotElements = Array.from(rootRef.value.querySelectorAll('.dot-matrix__dot'))
+}
+
+let frameCount = 0
+let timer = null
+let scratchOpacity = new Float32Array(0)
+let scratchColor = []
+let prevTouched = []
+
+function clearTouched() {
+  for (const idx of prevTouched) {
+    scratchOpacity[idx] = 0
+    const el = dotElements[idx]
+    if (el) {
+      el.classList.remove('is-lit')
+      el.style.removeProperty('opacity')
+      el.style.removeProperty('--dot-color')
+    }
+  }
+  prevTouched = []
+}
+
+function tickFrame() {
+  frameCount += 1
+  clearTouched()
+
+  const touchedThisFrame = []
+  const apply = (x, y, opacity, color) => {
+    if (x < 0 || x >= GRID || y < 0 || y >= GRID || opacity <= 0.02) return
+    const idx = y * GRID + x
+    if (scratchOpacity[idx] === 0) touchedThisFrame.push(idx)
+    if (opacity > scratchOpacity[idx]) {
+      scratchOpacity[idx] = opacity
+      scratchColor[idx] = color
+    }
+  }
+
+  if (props.condition === 'rain') computeRainFrame(frameCount, apply)
+  else if (props.condition === 'snow') computeSnowFrame(frameCount, apply)
+  else if (props.condition === 'fog') computeFogFrame(frameCount, apply)
+
+  for (const idx of touchedThisFrame) {
+    const el = dotElements[idx]
+    if (!el) continue
+    el.classList.add('is-lit')
+    el.style.setProperty('--dot-color', props.colored ? scratchColor[idx] : '')
+    el.style.opacity = scratchOpacity[idx]
+  }
+  prevTouched = touchedThisFrame
+}
+
+function stopAnimationLoop() {
+  if (timer) {
+    clearInterval(timer)
+    timer = null
+  }
+  clearTouched()
+  scratchOpacity = new Float32Array(0)
+  scratchColor = []
+}
+
+async function startAnimationLoopIfNeeded() {
+  stopAnimationLoop()
+  if (!props.animated || !FRAME_DRIVEN_CONDITIONS.has(props.condition)) return
+
+  await refreshDotElements()
+  frameCount = 0
+  scratchOpacity = new Float32Array(CELL_COUNT)
+  scratchColor = Array.from({ length: CELL_COUNT }, () => null)
+  prevTouched = []
+  timer = setInterval(tickFrame, 80)
+}
+
+// condition이 바뀌면 dots(computed)가 새 구조로 다시 렌더되므로, DOM 참조도 다시 캐시하고
+// 루프를 재시작해야 한다. animated가 꺼지면(예: 홈 카드) 루프를 멈추고 정적 프레임만 보여준다.
+// immediate:true라 setup 단계(마운트 전)에 한 번 동기 호출되지만, 이 함수는 async라
+// refreshDotElements() 내부의 await nextTick()에서 잠깐 양보한 뒤 재개되므로, 실제 DOM
+// 갱신(및 마운트)이 끝난 뒤에 dotElements를 캐시하게 된다 — KoreaMapDots.vue의
+// refreshDotElements와 같은 패턴.
+watch([() => props.condition, () => props.animated], startAnimationLoopIfNeeded, { immediate: true })
+
+onUnmounted(() => {
+  stopAnimationLoop()
 })
 </script>
 
 <template>
   <div
+    ref="rootRef"
     class="dot-matrix"
     :class="[`dot-matrix--${size}`, { 'dot-matrix--animated': animated }]"
     :style="{ gridTemplateColumns: `repeat(${GRID}, 1fr)` }"

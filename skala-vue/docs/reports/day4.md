@@ -1900,6 +1900,78 @@
 
 ---
 
+## 27. 상세 페이지 롤백 + DotMatrixIcon.vue 렌더링 최적화 구현
+
+**요구사항**
+- 직전 라운드(26번)의 "창문 밖 풍경 + 고양이 실루엣" 상세 페이지 리디자인이 사용자가 원한 방향이 아니었다 — 단순한 레이아웃 개선을 기대했는데 과하게 꾸민 결과물이었다는 피드백. 레이아웃/일러스트를 롤백하고 원래의 도트 매트릭스 애니메이션을 복원.
+- 새 참고 이미지(아이폰 위젯 스타일)를 활용한 재디자인도 검토했으나, 사용자가 이번 라운드에서는 레이아웃 변경 자체를 빼고 롤백과 최적화만 진행해달라고 요청 — 레이아웃 개선은 다음으로 미룸.
+- 26번에서 "제시만" 했던 `DotMatrixIcon.vue` 렌더링 최적화(애니메이션 프레임마다 1296개 도트를 Vue 반응형으로 전체 재렌더링하던 문제)를 실제로 구현.
+
+**사고 과정**
+- 롤백에서 가장 조심할 부분은 26번 커밋(`542d3d5`)에 레이아웃 변경과 데모 모드 버그 수정이 함께 들어가 있었다는 점이었다 — 사용자는 "이에 대하여"(고양이/일러스트) 롤백을 요청한 것이지 버그 수정까지 되돌리라는 게 아니었으므로, `WeatherDetailView.vue`는 스크립트(데모 분기·watch)는 남기고 템플릿·스타일만 정확히 26번 이전 시점(`736760b`)으로 되돌리는 부분 롤백이 필요했다. `git show <커밋>:<경로>`로 이전 시점의 파일 내용을 그대로 꺼내와, 통째로 되돌려도 되는 파일(`WeatherStatsPanel.vue`)과 부분만 되돌려야 하는 파일(`WeatherDetailView.vue`)을 구분해서 처리했다.
+- 이번 지시에서 "네가 요청 없이 뭔가를 더 만들지 말라"는 신호가 명확했기 때문에, 계획 단계에서 넣었던 "새 참고 이미지 기반 레이아웃" 절을 사용자가 다시 빼달라고 한 순간 바로 통째로 들어냈다 — 재해석하거나 축소된 버전을 남기지 않고 완전히 제거했다. 같은 실수를 반복하지 않기 위해 이 피드백을 메모리 파일로 남겨, 앞으로 이 프로젝트에서 "레이아웃 참고" 요청이 오면 처음부터 보수적으로 접근하도록 했다.
+- `DotMatrixIcon.vue` 최적화는 `KoreaMapDots.vue`에서 이미 검증한 패턴을 그대로 옮기는 작업이었다. 핵심은 "dots가 더 이상 frame에 의존하지 않게" 만드는 것 — 원래 `computed`가 `frame.value`를 읽었기 때문에 Vue가 그 의존성을 추적해 80ms마다 전체 배열을 다시 만들고 v-for 전체를 diff했다. `frame` 참조를 computed에서 완전히 들어내고, 비/눈/안개 조건은 항상 "프레임 0" 정적 배열만 반응형으로 렌더링하게 한 뒤, 실제 애니메이션은 `setInterval` 콜백 안에서 DOM에 직접 쓰는 별도 루프로 분리했다.
+- 기존 `buildRainFrame`/`buildSnowFrame`/`buildFogFrame`은 "배열을 만들어 반환"하는 형태였는데, 이걸 그대로 두 곳(반응형 초기 렌더용 배열 생성 / imperative 프레임별 DOM 쓰기)에서 재사용하려고, 실제 계산 로직(`computeRainFrame`/`computeSnowFrame`/`computeFogFrame`)을 "터치되는 칸마다 콜백을 부르는" 형태로 뽑아냈다. 같은 수학 공식을 중복 작성하지 않으면서 두 가지 다른 소비 방식(배열에 쓰기 vs DOM에 쓰기)을 모두 지원할 수 있었다.
+- `condition`이나 `animated`가 바뀌면 `dots`(반응형)가 새 구조로 다시 렌더되므로, DOM 참조(`dotElements`)도 다시 캐시하고 애니메이션 루프도 재시작해야 했다. `watch([condition, animated], startAnimationLoopIfNeeded, { immediate: true })`로 처리했는데, `immediate: true`라 컴포넌트가 마운트되기도 전(setup 단계)에 첫 호출이 일어난다는 점이 걸렸다 — `refreshDotElements` 내부의 `await nextTick()`이 실행을 잠깐 양보한 뒤 재개되므로, 실제로 DOM 참조를 읽는 시점은 마운트가 끝난 다음이 된다는 걸 확인하고(이미 `KoreaMapDots.vue`에서 같은 패턴을 써봤던 경험이 있어서) 그대로 적용했다.
+
+**해결 과정**
+1. `src/components/practices/weather/WeatherStatsPanel.vue`를 `git show 736760b:...` 내용으로 완전히 되돌렸다(26번에서 추가했던 `dark` prop·헤더 조건부 숨김·다크 톤 커스텀 프로퍼티 전부 제거).
+2. `src/components/practices/weather/WeatherWindowScene.vue` 삭제.
+3. `src/views/WeatherDetailView.vue`: 템플릿·스타일만 `736760b` 시점으로 되돌리고(밝은 카드, `WeatherStatsPanel :city="weather"` 원래 형태), 스크립트의 데모 모드 분기·`watch`는 그대로 유지했다.
+4. `src/components/practices/weather/DotMatrixIcon.vue` 리팩터링:
+
+   #### `src/components/practices/weather/DotMatrixIcon.vue`
+   ```js
+   // 계산 로직을 "콜백을 부르는" 형태로 분리 — 배열 생성과 DOM 직접 쓰기 양쪽에서 재사용
+   function computeRainFrame(frame, apply) {
+     RAIN_DROPS.forEach(({ x, phase, speed }) => {
+       // ...같은 위치 계산...
+       RAINDROP_SHAPE.forEach(([ox, oy]) => apply(x + ox, cy + oy, weight, RAIN_COLOR))
+     })
+   }
+
+   // dots는 이제 frame에 의존하지 않는다 — 비/눈/안개도 "프레임 0" 정적 배열만 반응형으로 만든다.
+   const dots = computed(() => {
+     if (props.condition === 'rain') return buildRainFrame(0)
+     // ...
+   })
+
+   // 실제 애니메이션은 여기서 DOM에 직접 쓴다 — Vue 반응형을 거치지 않는다.
+   function tickFrame() {
+     frameCount += 1
+     clearTouched()
+     const touchedThisFrame = []
+     const apply = (x, y, opacity, color) => { /* scratch에 기록 */ }
+     if (props.condition === 'rain') computeRainFrame(frameCount, apply)
+     // ...
+     for (const idx of touchedThisFrame) {
+       const el = dotElements[idx]
+       el.classList.add('is-lit')
+       el.style.setProperty('--dot-color', ...)
+       el.style.opacity = scratchOpacity[idx]
+     }
+     prevTouched = touchedThisFrame
+   }
+   watch([() => props.condition, () => props.animated], startAnimationLoopIfNeeded, { immediate: true })
+   ```
+5. `npm run lint` 과정에서 `new Array(CELL_COUNT).fill(null)`이 oxlint 규칙(`unicorn/no-new-array`)에 걸려 `Array.from({ length: CELL_COUNT }, () => null)`로 수정했다(이전 라운드에서 `KoreaMapDots.vue`를 고칠 때도 같은 규칙에 걸렸던 적이 있어 바로 알아챘다).
+6. Chrome 확장으로 확인: 상세 페이지가 원래의 밝은 카드+도트 애니메이션으로 돌아왔는지, 데모 모드 버그 수정이 여전히 살아있는지(부산 클릭 시 "비 (데모)"로 즉시 전환), 비 애니메이션이 imperative 방식으로 바뀐 뒤에도 시각적으로 이전과 동일하게 계속 움직이는지(2초 간격 스크린샷으로 빗방울 위치가 실제로 바뀌는 것 확인), 홈 카드(`animated=false`, 6가지 조건 전부)와 지도 팝업(`compact`, `animated=true`)에서도 회귀가 없는지 확인했다.
+
+**트러블슈팅**
+- 문제: 부분 롤백 대상(`WeatherDetailView.vue`)과 전체 롤백 대상(`WeatherStatsPanel.vue`)을 구분하지 않고 한꺼번에 `git checkout`하면 데모 모드 버그 수정까지 같이 날아갈 뻔했다.
+- 해결: 파일별로 "스크립트는 남기고 템플릿/스타일만 되돌리기"와 "파일 전체를 되돌리기"를 구분해서, 전자는 `git show`로 이전 버전을 참고해 손으로 재작성하고 후자만 `git show > 파일`로 통째로 덮어썼다.
+
+**결과**
+- `npm run lint`(기존 무관 오류 1건 제외)·`npx vite build` 통과.
+- Chrome 확장으로 상세 페이지 롤백(밝은 카드+도트 애니메이션 복원, 고양이/스카이라인 완전히 사라짐), 데모 모드 버그 수정 유지, `DotMatrixIcon` 애니메이션 시각적 회귀 없음(비/눈/뇌우/해/구름/안개 전부), 홈 카드·지도 팝업 정상 동작을 확인했다. 콘솔 에러 없음.
+
+**느낀점**
+- 하나의 커밋에 "버그 수정"과 "기능/디자인 변경"을 함께 담으면, 나중에 그중 하나만 되돌리고 싶을 때 손이 많이 간다는 걸 직접 겪었다 — 이번엔 다행히 각 변경의 경계가 명확해서 부분 롤백이 어렵지 않았지만, 앞으로는 애초에 커밋 단위를 더 잘게 나누는 게 나을 수 있겠다.
+- 사용자가 명시적으로 "이건 아니다"라고 되돌리라고 한 부분은, 절반만 반영하거나 다른 형태로 다시 시도하지 않고 정확히 원래 상태로 되돌리는 게 가장 신뢰를 지키는 방법이라는 걸 다시 확인했다 — "그래도 이 정도는 남겨두면 낫지 않을까"하는 판단을 보태지 않는 것 자체가 중요했다.
+- 같은 최적화 패턴(반응형 배열 생성 대신 DOM 직접 쓰기)을 두 번째로 적용해보니, 첫 번째(`KoreaMapDots.vue`)보다 무엇을 어디까지 리팩터링해야 하는지 훨씬 빠르게 판단할 수 있었다 — 성능 문제 하나를 제대로 뜯어보고 나면, 같은 유형의 문제를 다른 코드에서 알아보고 고치는 속도가 확실히 빨라진다.
+
+---
+
 <!--
 아래 형식을 복사해서 작업 단위마다 항목을 추가합니다.
 
