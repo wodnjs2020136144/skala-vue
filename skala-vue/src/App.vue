@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { RouterLink, RouterView, useRouter } from 'vue-router'
+import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import UnitToggler from './components/UnitToggler.vue'
 import SearchBar from './components/practices/weather/SearchBar.vue'
 import FavoriteHeartDots from './components/practices/weather/FavoriteHeartDots.vue'
@@ -9,6 +9,7 @@ import { useFavoritesStore } from './stores/favoritesStore'
 import { useDemoStore } from './stores/demoStore'
 import { CITY_LIST } from './services/weatherApi'
 
+const route = useRoute()
 const router = useRouter()
 const searchStore = useSearchStore()
 const favoritesStore = useFavoritesStore()
@@ -80,7 +81,11 @@ onUnmounted(() => document.removeEventListener('click', handleOutsideClick))
       {{ demoStore.useDummyData ? '실제 데이터 보기' : '데모 데이터 보기' }}
     </button>
 
+    <!-- 홈 화면(weather-home)은 카드 목록 위에 자체 검색창(SearchBar.vue, 슬롯 배치 실습 과제
+         산출물)이 이미 있어, 같은 store를 공유하는 이 nav 검색창을 그 화면에서만 숨긴다 —
+         지도 등 다른 화면에서는 이 검색창이 유일한 검색 진입점이라 그대로 둔다. -->
     <SearchBar
+      v-if="route.name !== 'weather-home'"
       class="app-nav__search"
       :query="searchStore.query"
       @update-query="searchStore.setQuery"

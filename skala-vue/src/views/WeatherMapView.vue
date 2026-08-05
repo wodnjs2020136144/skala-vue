@@ -6,6 +6,7 @@ import { useFavoritesStore } from '../stores/favoritesStore'
 import { useSearchStore } from '../stores/searchStore'
 import { useDemoStore } from '../stores/demoStore'
 import { CITY_LIST, fetchCurrentWeather, getDummyWeather } from '../services/weatherApi'
+import { MAP_LANDMARKS } from '../services/gameRegions'
 import { useDraggable } from '../composables/useDraggable'
 import { useRegionGame } from '../composables/useRegionGame'
 import KoreaMapDots from '../components/practices/weather/KoreaMapDots.vue'
@@ -272,7 +273,7 @@ const mascotCondition = computed(() => {
     <template v-else>
       <div class="weather-map__body">
         <div class="weather-map__grid-area">
-          <KoreaMapDots ref="mapDotsRef" :cities="cityList" :selected-id="selectedId"
+          <KoreaMapDots ref="mapDotsRef" :cities="cityList" :landmarks="MAP_LANDMARKS" :selected-id="selectedId"
             :game-active="game.status.value === 'playing'" @select-city="selectCity" @map-pick="handleMapPick" />
         </div>
 

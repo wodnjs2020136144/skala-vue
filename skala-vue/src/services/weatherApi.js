@@ -6,6 +6,12 @@ const BASE_URL = 'https://api.openweathermap.org/data/2.5/weather'
 // 화면에 보여줄 도시 메타데이터. name은 한글 표시용, query는 OpenWeatherMap 검색용(영문+국가코드).
 // mapX/mapY는 KoreaMapDots 지도 패널 위에서의 상대 위치(0~1)로, 실측 GPS 좌표가 아니라
 // 다른 아이콘들과 마찬가지로 손으로 근사한 스타일화된 배치 값이다.
+//
+// 17개 시·도를 모두 커버하도록 city_10~17을 추가했다(원래 9개 + 8개). 좌표는 KOREA_MATRIX
+// 22x41 그리드 위에서 Node.js로 육지 칸인지·다른 지역과 칸이 겹치지 않는지 사전 검증했다.
+// city_10~16은 `gameRegions.js`의 지명 픽셀 목록에 이미 검증된 좌표가 있어 그대로 재사용했고
+// (그쪽 목록에서는 제거해 미니게임에 같은 지역이 중복으로 나오지 않게 했다), city_17(홍성)만
+// 새로 좌표를 찾았다.
 export const CITY_LIST = [
   { id: 'city_01', name: '서울', query: 'Seoul,KR', mapX: 0.432, mapY: 0.598 },
   { id: 'city_02', name: '수원', query: 'Suwon,KR', mapX: 0.432, mapY: 0.634 },
@@ -16,6 +22,14 @@ export const CITY_LIST = [
   { id: 'city_07', name: '광주', query: 'Gwangju,KR', mapX: 0.341, mapY: 0.805 },
   { id: 'city_08', name: '울산', query: 'Ulsan,KR', mapX: 0.705, mapY: 0.78 },
   { id: 'city_09', name: '제주', query: 'Jeju,KR', mapX: 0.295, mapY: 0.963 },
+  { id: 'city_10', name: '춘천', query: 'Chuncheon,KR', mapX: 0.568, mapY: 0.524 },
+  { id: 'city_11', name: '청주', query: 'Cheongju,KR', mapX: 0.523, mapY: 0.671 },
+  { id: 'city_12', name: '전주', query: 'Jeonju,KR', mapX: 0.432, mapY: 0.744 },
+  { id: 'city_13', name: '목포', query: 'Mokpo,KR', mapX: 0.25, mapY: 0.841 },
+  { id: 'city_14', name: '안동', query: 'Andong,KR', mapX: 0.659, mapY: 0.695 },
+  { id: 'city_15', name: '창원', query: 'Changwon,KR', mapX: 0.568, mapY: 0.793 },
+  { id: 'city_16', name: '세종', query: 'Sejong,KR', mapX: 0.432, mapY: 0.695 },
+  { id: 'city_17', name: '홍성', query: 'Hongseong,KR', mapX: 0.29, mapY: 0.745 },
 ]
 
 export function findCityById(id) {

@@ -6,6 +6,12 @@ const props = defineProps({
     type: Array,
     required: true, // { id, name, mapX, mapY, condition, windDeg, windSpeed }
   },
+  // 날씨 데이터가 없는 "지명 픽셀" — 이름·좌표만 있다(gameRegions.js의 MAP_LANDMARKS).
+  // 날씨 마커와 겹치는 칸은 날씨 마커가 우선이고 지명 픽셀은 건너뛴다(buildGrid 참고).
+  landmarks: {
+    type: Array,
+    default: () => [], // { id, name, mapX, mapY }
+  },
   selectedId: {
     type: String,
     default: null,
@@ -176,6 +182,17 @@ function buildGrid(width, height) {
     cityByKey.set(`${koreaOffsetCol + localCol},${koreaOffsetRow + localRow}`, city)
   })
 
+  // 지명 픽셀(날씨 데이터 없음)도 같은 방식으로 칸에 배치하되, 날씨 도시와 칸이 겹치면
+  // 날씨 도시를 우선한다(cityByKey.has 체크) — 지명 픽셀은 장식용이라 조용히 건너뛴다.
+  const landmarkByKey = new Map()
+  props.landmarks.forEach((landmark) => {
+    const localCol = Math.round(landmark.mapX * GRID_W - 0.5)
+    const localRow = Math.round(landmark.mapY * GRID_H - 0.5)
+    const key = `${koreaOffsetCol + localCol},${koreaOffsetRow + localRow}`
+    if (cityByKey.has(key)) return
+    landmarkByKey.set(key, landmark)
+  })
+
   const cellCount = newCols * newRows
   const newLandMask = new Uint8Array(cellCount)
   const newDots = []
@@ -193,13 +210,15 @@ function buildGrid(width, height) {
 
       const isLand = isKoreaLand
       const index = row * newCols + col
+      const key = `${col},${row}`
       newLandMask[index] = isLand ? 1 : 0
       newDots.push({
         col,
         row,
         index,
         isLand,
-        city: cityByKey.get(`${col},${row}`) ?? null,
+        city: cityByKey.get(key) ?? null,
+        landmark: landmarkByKey.get(key) ?? null,
       })
     }
   }
@@ -217,7 +236,7 @@ function buildGrid(width, height) {
 // 데모/실제 데이터 토글 등으로 부모의 cities 배열이 통째로 교체되면 그리드를 다시 만든다.
 // (buildGrid는 zoom/pan 상태를 건드리지 않으므로 다시 그려도 화면 위치는 유지된다.)
 watch(
-  () => props.cities,
+  () => [props.cities, props.landmarks],
   () => {
     if (!containerW || !containerH) return
     buildGrid(containerW, containerH)
@@ -835,7 +854,9 @@ function showHint(col, row) {
 
 defineExpose({ spawnBurst, mapToColRow, flashKorea, shakeKorea, showHint, clearHint, zoomToKorea, resetZoom, describeCell })
 
-function handleCityHover(dot, event) {
+// 날씨 도시·지명 픽셀 공용 호버 핸들러 — 툴팁 위치 계산 로직은 둘이 같고, 표시 내용만
+// 템플릿에서 dot.city/dot.landmark 여부로 갈린다.
+function handleDotHover(dot, event) {
   hoveredDot.value = dot
   if (!rootRef.value) return
   const rootRect = rootRef.value.getBoundingClientRect()
@@ -878,6 +899,7 @@ function handleCityHover(dot, event) {
             'is-city': dot.city && !gameActive,
             'is-selected': dot.city?.id === selectedId && !gameActive,
             [`is-condition-${dot.city?.condition}`]: !!dot.city && !gameActive,
+            'is-landmark': dot.landmark && !gameActive,
           }"
           :style="
             dot.city && !gameActive
@@ -888,15 +910,17 @@ function handleCityHover(dot, event) {
                 }
               : undefined
           "
-          @mouseenter="dot.city && !gameActive && handleCityHover(dot, $event)"
+          @mouseenter="(dot.city || dot.landmark) && !gameActive && handleDotHover(dot, $event)"
           @mouseleave="hoveredDot = null"
           @click="handleDotClick(dot, $event)"
         />
       </div>
     </div>
 
-    <div v-if="hoveredDot?.city" class="korea-map__bubble" :style="{ left: `${tooltipPos.left}px`, top: `${tooltipPos.top}px` }">
-      {{ hoveredDot.city.name }} {{ CONDITION_LABELS_KR[hoveredDot.city.condition] ?? '' }}
+    <div v-if="hoveredDot?.city || hoveredDot?.landmark" class="korea-map__bubble"
+      :style="{ left: `${tooltipPos.left}px`, top: `${tooltipPos.top}px` }">
+      {{ hoveredDot.city?.name ?? hoveredDot.landmark?.name }}
+      {{ hoveredDot.city ? (CONDITION_LABELS_KR[hoveredDot.city.condition] ?? '') : '' }}
     </div>
   </div>
 </template>
@@ -994,6 +1018,19 @@ function handleCityHover(dot, event) {
 
 .korea-map__dot.is-city.is-selected:hover {
   box-shadow: 0 0 0 3px var(--pulse-color, var(--amber));
+}
+
+/* 지명 픽셀 — 날씨 데이터가 없는 장식용 지역 표시. 날씨 도시(is-city)처럼 색을 칠하거나
+   팝업을 띄우지 않고, 육지색 그대로에 얇은 잉크색 테두리 하나만 추가해 "여기 지명이 있다"만
+   표시한다. 클릭해도 아무 반응이 없으므로 커서도 손가락 모양으로 바꾸지 않는다. */
+.korea-map__dot.is-landmark {
+  box-shadow: 0 0 0 2px var(--ink);
+}
+
+.korea-map__dot.is-landmark:hover {
+  position: relative;
+  z-index: 3;
+  transform: scale(1.5);
 }
 
 /* 조건별 강조 링 — 호버했을 때만 재생되어 평소엔 리페인트 비용이 전혀 없다. */
