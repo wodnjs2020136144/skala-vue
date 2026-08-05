@@ -916,12 +916,19 @@ function toggleCompareMode() {
    직접 지정해 화면 폭에 맞춘다 — 인라인 style이 아니라 CSS 변수를 거치게 해둔 덕에
    여기서 자연스럽게 override된다. 시트는 한 번에 하나만(.is-sheet-open) 펼쳐진다. */
 @media (max-width: 1000px) {
+  .weather-map {
+    /* 탭바 버튼 높이(56px)는 고정하고, iOS Safari의 상시 하단 바(홈 인디케이터 영역)만큼은
+       안전 영역 인셋으로 별도로 더해 겹치지 않게 한다(index.html의 viewport-fit=cover가
+       있어야 이 값이 0이 아니게 잡힌다). */
+    --tab-bar-h: calc(56px + env(safe-area-inset-bottom, 0px));
+  }
+
   .map-window--info,
   .map-window--game {
     left: 0;
     top: auto;
     right: 0;
-    bottom: 56px;
+    bottom: var(--tab-bar-h);
     width: 100%;
     max-width: 100%;
     max-height: 55dvh;
@@ -943,8 +950,8 @@ function toggleCompareMode() {
   }
 
   .weather-map__body {
-    /* 하단 탭바(56px)만큼 지도 아래 여백을 둬 제주 등 남쪽 도트가 탭바에 가리지 않게 한다. */
-    padding-bottom: 56px;
+    /* 하단 탭바만큼 지도 아래 여백을 둬 제주 등 남쪽 도트가 탭바에 가리지 않게 한다. */
+    padding-bottom: var(--tab-bar-h);
   }
 
   .mobile-sheet-tabs {
@@ -954,7 +961,11 @@ function toggleCompareMode() {
     bottom: 0;
     z-index: 16;
     display: flex;
-    height: 56px;
+    /* 전역 box-sizing: border-box라 padding은 height 안에서 깎여나간다 — 버튼이 누를 수
+       있는 56px를 그대로 유지하려면 안전 영역만큼 height 자체를 늘려야 한다(--tab-bar-h가
+       이미 56px + 안전 영역으로 계산돼 있다). */
+    height: var(--tab-bar-h, 56px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
     background: var(--ink);
     border-top: 2px solid var(--amber);
   }

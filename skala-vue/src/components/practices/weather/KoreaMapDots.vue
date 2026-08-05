@@ -135,12 +135,19 @@ function pulseColor(city) {
   return CONDITION_ACCENT_COLORS[city.condition] ?? CONDITION_ACCENT_COLORS.sun
 }
 
-// 도시 도트의 테두리는 더 이상 조건색을 어둡게 한 값이 아니라, 일반 육지(.is-land)와 완전히
-// 같은 값을 쓴다 — 도시가 지형 위에 붙은 스티커처럼 튀지 않고 자연스럽게 섞여 보이게 하고,
-// 대신 주변 칸에 흘리는 조건색 후광(HALO_*, buildGrid 참고)으로 존재를 드러낸다.
-const LAND_BORDER_COLOR = '#d1cabb'
-function markerBorderColor() {
-  return LAND_BORDER_COLOR
+// 육지·바다처럼 도시 도트의 테두리(box-shadow)도 자기 색 그대로가 아니라 살짝 어둡게 —
+// 배경과 구분이 잘 안 되던 문제를 육지에 썼던 것과 같은 방식으로 해결한다. 육지색 고정값을
+// 써봤지만("테두리가 지형에 섞이게") 오히려 어색하다는 피드백을 받아, 테두리 안의 색(조건색)
+// 계열을 어둡게 한 값으로 되돌린다.
+function darken(hex, amount = 0.15) {
+  const num = parseInt(hex.slice(1), 16)
+  const r = Math.round(((num >> 16) & 255) * (1 - amount))
+  const g = Math.round(((num >> 8) & 255) * (1 - amount))
+  const b = Math.round((num & 255) * (1 - amount))
+  return `rgb(${r}, ${g}, ${b})`
+}
+function markerBorderColor(city) {
+  return darken(markerColor(city.condition))
 }
 
 // 날씨 후광 반경(칸)과, 중심(도시)에서 멀어질수록 옅어지는 정도.
@@ -171,7 +178,7 @@ watch(
     }
   },
 )
-const tooltipPos = ref({ left: 0, top: 0 })
+const tooltipPos = ref({ left: 0, top: 0, tailOffset: 0 })
 
 // --- 두 도시 비교 경로 ---
 // 켜져 있으면 도시 도트 클릭이 팝업을 여는 대신 "출발/도착"을 고르는 데 쓰인다.
@@ -1145,8 +1152,14 @@ function mapToColRow(mapX, mapY) {
 // scale/panX/panY는 tick()에서 targetScale/targetPanX/Y를 향해 매 프레임 보간되므로,
 // 여기서는 목표값만 세팅하고 ensureTicking()으로 보간을 깨우면 된다.
 function zoomToKorea() {
-  // 한반도 세로(GRID_H칸)의 절반이 화면(rows.value칸)을 꽉 채우도록 확대한다.
-  targetScale = clamp(rows.value / (GRID_H / 2), MIN_SCALE, MAX_SCALE)
+  // 한반도 세로(GRID_H칸)의 절반이 화면(rows.value칸)을 꽉 채우도록 확대하는 배율(heightScale).
+  // 다만 이 값만 쓰면 세로로 긴 모바일 화면일수록 배율이 커지고, scale은 가로에도 똑같이
+  // 곱해져 한반도 폭(GRID_W칸)이 화면 가로(cols.value칸) 밖으로 넘쳐버린다(게임 진행 불가) —
+  // 한반도 폭이 화면을 넘지 않는 상한(widthScale)도 함께 구해 더 작은 쪽을 쓴다. 가로가
+  // 넉넉한 데스크톱에서는 widthScale이 커서 기존과 동일하게 heightScale이 그대로 적용된다.
+  const heightScale = rows.value / (GRID_H / 2)
+  const widthScale = cols.value / GRID_W
+  targetScale = clamp(Math.min(heightScale, widthScale), MIN_SCALE, MAX_SCALE)
   // 화면 중앙이 한반도 중앙에 오도록 pan을 계산한다 — buildGrid가 항상 koreaOffsetCol/Row를
   // 그리드 중앙에 맞추므로, "그리드 자체의 중앙"(scale=1일 때 좌표로 containerW/2,
   // containerH/2)이 곧 한반도 중앙이다. screen = pan + scale * local 공식(handleWheel과 동일)을
@@ -1259,7 +1272,7 @@ function dotStyle(dot) {
     return {
       background: markerColor(dot.city.condition),
       '--pulse-color': pulseColor(dot.city),
-      '--marker-border-color': markerBorderColor(),
+      '--marker-border-color': markerBorderColor(dot.city),
     }
   }
   if (dot.halo) {
@@ -1271,6 +1284,14 @@ function dotStyle(dot) {
   return undefined
 }
 
+// 말풍선 폭의 절반으로 가정하는 값 — 실측(nextTick) 없이 분석적으로 clamp하기 위한 안전
+// 상한이다. 내용은 도시/지명 이름(최대 3글자, 예: "동두천")과 조건 라벨(최대 2글자, "뇌우")
+// 조합이 전부라 12px 픽셀폰트 기준 실제 폭보다 넉넉하게 잡았다.
+const BUBBLE_HALF_WIDTH = 80
+const BUBBLE_EDGE_PAD = 6
+// 말풍선 꼬리(::before, 폭 12px)가 박스 밖으로 삐져나가지 않는 한도.
+const BUBBLE_TAIL_MARGIN = 12
+
 // 날씨 도시·지명 픽셀 공용 호버 핸들러 — 툴팁 위치 계산 로직은 둘이 같고, 표시 내용만
 // 템플릿에서 dot.city/dot.landmark 여부로 갈린다.
 function handleDotHover(dot, event) {
@@ -1278,9 +1299,24 @@ function handleDotHover(dot, event) {
   if (!rootRef.value) return
   const rootRect = rootRef.value.getBoundingClientRect()
   const dotRect = event.currentTarget.getBoundingClientRect()
+  const desiredLeft = dotRect.left - rootRect.left + dotRect.width / 2
+  // 지도 가장자리(독도 등)에 있는 도트는 말풍선을 중앙 정렬하면 절반이 컨테이너 밖으로
+  // 나가 overflow: hidden에 잘린다 — 박스 위치 자체는 안쪽으로 당기고, 실제 도트 위치와
+  // 벌어진 만큼을 tailOffset으로 남겨 꼬리(CSS --tail-offset)가 계속 도트를 가리키게 한다.
+  const clampedLeft = clamp(
+    desiredLeft,
+    BUBBLE_HALF_WIDTH + BUBBLE_EDGE_PAD,
+    rootRect.width - BUBBLE_HALF_WIDTH - BUBBLE_EDGE_PAD,
+  )
+  const tailOffset = clamp(
+    desiredLeft - clampedLeft,
+    -(BUBBLE_HALF_WIDTH - BUBBLE_TAIL_MARGIN),
+    BUBBLE_HALF_WIDTH - BUBBLE_TAIL_MARGIN,
+  )
   tooltipPos.value = {
-    left: dotRect.left - rootRect.left + dotRect.width / 2,
+    left: clampedLeft,
     top: dotRect.top - rootRect.top,
+    tailOffset,
   }
 }
 </script>
@@ -1328,7 +1364,7 @@ function handleDotHover(dot, event) {
     </div>
 
     <div v-if="hoveredDot?.city || hoveredDot?.landmark" class="korea-map__bubble"
-      :style="{ left: `${tooltipPos.left}px`, top: `${tooltipPos.top}px` }">
+      :style="{ left: `${tooltipPos.left}px`, top: `${tooltipPos.top}px`, '--tail-offset': `${tooltipPos.tailOffset}px` }">
       {{ hoveredDot.city?.name ?? hoveredDot.landmark?.name }}
       {{ hoveredDot.city ? (CONDITION_LABELS_KR[hoveredDot.city.condition] ?? '') : '' }}
     </div>
@@ -1698,7 +1734,9 @@ function handleDotHover(dot, event) {
 .korea-map__bubble::after {
   content: '';
   position: absolute;
-  left: 50%;
+  /* 박스가 가장자리에서 안쪽으로 clamp되면(handleDotHover의 tailOffset) 꼬리는 이 오프셋만큼
+     반대로 이동해 원래 도트 위치를 계속 가리킨다. 기본값 0px이면 항상 중앙(기존 동작). */
+  left: calc(50% + var(--tail-offset, 0px));
   transform: translateX(-50%);
 }
 
