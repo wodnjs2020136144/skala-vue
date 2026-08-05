@@ -2461,4 +2461,380 @@ const seaTone = computed(() => {
 -
 
 ---
--->
+
+## 33. 지도 탭 신기능 정리(레이더·파티클 롤백/버그 수정) + 바다 눌림 연출 + 시간대 필터 레이어 + 날씨 후광
+
+**요구사항**
+1. 레이더 스윕 기본값을 off로, 그리고 스윕을 껐을 때 지나간 자리 색이 원래대로 안 돌아오는 버그 수정.
+2. 날씨 파티클(비/눈/안개 흩뿌림) 롤백.
+3. 두 도시 비교의 버튼들을 통일감 있게.
+4. 추가했던 지명 픽셀의 테두리를 일반 지형과 동일하게.
+5. 바다 파동을 "눌렸다가 일렁이는" 느낌으로, 최적화를 최우선으로.
+6. 풍속 등 글씨가 박스를 벗어나는 소소한 오류 수정.
+7. 날씨 탭 기본 정렬을 권역순으로.
+8. 시간대 슬라이더가 배경색을 바꾸는 대신 필터 레이어처럼 덧씌우게.
+9. 날씨 지역을 한반도 지형과 통일감 있게 하면서도 구분되게.
+
+**사고 과정**
+- 직전 라운드(32번 항목 이전, 커밋 `56a362d`)에서 레이더·파티클·시간대 슬라이더·두 도시 비교를 한꺼번에 얹었는데, 실제로 써보니 과했다 — 레이더는 정보량이 적어 평소엔 꺼두는 게 낫고, 파티클은 지도를 지저분하게만 만들었다. "일단 넣고 판단은 나중에"가 아니라 실사용 피드백을 받아 걷어낼 건 걷어내는 것도 이 프로젝트 사이클의 일부라고 판단했다.
+- 레이더 잔광 버그는 원인을 코드에서 먼저 찾았다: `buildGrid()`가 리사이즈·데이터 재로드 때마다 `radarScratch` 등 버퍼를 새 `Float32Array`로 교체하는데, 도트는 `:key="col-row"`라 같은 DOM 노드가 재사용된다. 버퍼를 갈아치우면 "지난 프레임에 지울 인덱스" 추적(`prevTouched` 등)도 리셋되어, 이미 DOM에 박아둔 `--radar` 인라인 스타일을 아무도 지우지 않게 된다는 걸 확인했다. → 버퍼 교체 전에 항상 현재 DOM의 오버레이 커스텀 프로퍼티를 먼저 지우는 함수(`clearDotOverlayStyles`)를 추가하는 방식으로 접근했다.
+- 바다 파동을 "눌렸다가 일렁이는" 느낌으로 바꾸는 요구사항은, 이미 있던 육지 프레스(`spawnPress`)와 파동(`spawnRipple`)을 재사용하는 쪽으로 풀었다 — 새 애니메이션 시스템을 만들지 않고, 바다 클릭 시 짧고 좁은 "바다 눌림"(별도 버퍼 `pressScratch`, `--press`)을 먼저 띄우고 `spawnRipple`에 지연 인자를 추가해 180ms 뒤 파동이 뒤따르게 했다. 육지 프레스(밝아짐 반대 방향)와 버퍼를 공유하면 두 효과가 서로 지우게 되므로 반드시 분리해야 했다.
+- 시간대 슬라이더는 기존에 `.weather-map`의 `background-color`를 통째로 갈아치우는 방식이라, 바다만 색이 바뀌고 육지는 그대로라 "필터"가 아니라 "다른 지도"처럼 보였다. `mix-blend-mode`는 도트 수천 개가 계속 애니메이션하는 위에 얹으면 매 프레임 재합성 비용이 붙을 걸 우려해 배제하고, 대신 alpha만 있는 반투명 단색 레이어를 지도 위에 한 장 얹는 방식을 택했다 — GPU 합성 한 장으로 끝나고 색이 바뀔 때만 리페인트되어 도트 애니메이션 비용과 독립적이다.
+- 날씨 지역 표현(9번)은 "도시 도트 자체가 튀는 스티커처럼 보인다"는 문제를, 도트 자체를 화려하게 만드는 대신 테두리를 육지와 완전히 같게 맞춰 지형에 흡수시키고 대신 주변 육지 칸에 조건색을 옅게 흘리는 "날씨 후광"으로 접근했다. 이 값은 `buildGrid()`에서 도시 위치가 정해질 때 한 번만 계산해 CSS 커스텀 프로퍼티로 박아두므로, 레이더·파동처럼 매 프레임 갱신되는 값이 아니라 요구사항의 "최적화 최우선" 제약과 자연히 맞아떨어졌다.
+
+**해결 과정**
+1. `buildGrid()`가 버퍼를 교체하기 전에 DOM에 남은 오버레이 커스텀 프로퍼티를 먼저 지우도록 했다. 레이더 토글을 끌 때도 감쇠를 기다리지 않고 즉시 지운다.
+
+#### 파일 경로: `src/components/practices/weather/KoreaMapDots.vue`
+```js
+function clearDotOverlayStyles() {
+  for (const el of dotElements) {
+    if (!el) continue
+    el.style.removeProperty('--radar')
+    el.style.removeProperty('--intensity')
+    el.style.removeProperty('--press')
+    el.style.removeProperty('--burst')
+    el.style.removeProperty('--burst-color')
+  }
+}
+
+function buildGrid(width, height) {
+  resetCompare()
+  clearDotOverlayStyles() // 버퍼를 새로 만들기 전에 항상 먼저 지운다
+  ...
+}
+
+watch(
+  () => props.radarEnabled,
+  (radar) => {
+    if (radar) { ensureTicking(); return }
+    for (const idx of radarActive) {
+      radarScratch[idx] = 0
+      radarInActive[idx] = 0
+      dotElements[idx]?.style.removeProperty('--radar')
+    }
+    radarActive = []
+  },
+)
+```
+
+2. 날씨 파티클 관련 prop·버퍼·`tick()` 계산·CSS `color-mix` 레이어를 전부 제거했다(`DotMatrixIcon.vue`가 쓰는 `utils/pixelWeatherFrames.js`는 그대로 둠). `WeatherMapView.vue`의 레이더 기본값도 `false`로 바꿨다.
+
+3. 지도 정보창 버튼(두 도시 비교·현재 시각으로·게임 시작)을 `retro-theme.css`와 같은 outline 톤의 공통 클래스로 통일했다.
+
+#### 파일 경로: `src/views/WeatherMapView.vue`
+```css
+.map-btn {
+  border: 1px solid var(--moss);
+  background: none;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-family: var(--font-pixel-kr);
+  font-size: 12px;
+  color: var(--ink);
+  cursor: pointer;
+}
+.map-btn:hover:not(:disabled) { border-color: var(--amber); color: var(--amber); }
+.map-btn.is-active { background: var(--amber); border-color: var(--amber); color: var(--ink); }
+.map-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+```
+
+4. 지명 픽셀 전용 box-shadow 규칙을 제거해 일반 육지(`.is-land`)와 같은 테두리를 그대로 물려받게 했다.
+
+5. 바다 클릭에 눌림→파동 2단 연출을 추가했다. `spawnPress`에 `isSea` 플래그, `spawnRipple`에 지연(`delayMs`) 인자를 추가하고, 바다 눌림은 별도 버퍼(`pressScratch`, `--press`)로 관리해 육지 프레스(`frameScratch`, `--intensity`)와 분리했다.
+
+#### 파일 경로: `src/components/practices/weather/KoreaMapDots.vue`
+```js
+function spawnRipple(col, row, delayMs = 0) {
+  const now = performance.now()
+  if (ripples.length >= MAX_RIPPLES) ripples.shift()
+  ripples.push({ col, row, startTime: now + delayMs })
+}
+function spawnPress(col, row, isSea = false) {
+  const now = performance.now()
+  if (presses.length >= MAX_PRESSES) presses.shift()
+  presses.push({ col, row, startTime: now, isSea })
+}
+// triggerCellEffect
+if (landMask[idx]) {
+  spawnPress(col, row)
+} else {
+  spawnPress(col, row, true)
+  spawnRipple(col, row, SEA_RIPPLE_DELAY) // 180ms 뒤 물결이 뒤따른다
+}
+```
+```css
+.korea-map__dot {
+  transform: scale(calc(1 - var(--press, 0) * 0.22 + var(--burst, 0) * 0.8));
+  filter: brightness(calc(1 - var(--press, 0) * 0.35 + var(--burst, 0) * 1.2));
+}
+```
+
+6. 정보창 즐겨찾기 표에서 풍속 값이 좁은 열을 넘어 옆 칸으로 삐져나오던 문제를 헤더에 단위를 옮기고 `min-width: 0` + `text-overflow: ellipsis`로 방어했다. 같은 부류의 잠재 오버플로(풍향 텍스트, 통계 막대 라벨/값)도 함께 방어했다.
+
+#### 파일 경로: `src/views/WeatherMapView.vue`
+```css
+.fav-compare__row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+```
+
+7. `WeatherHomeView.vue`의 기본 정렬 기준을 `'name'`에서 `'region'`으로 바꿨다.
+
+8. 시간대 슬라이더가 배경색을 바꾸는 대신 반투명 레이어를 덧씌우도록 바꿨다. 한낮(9~17시)은 alpha 0이라 슬라이더를 안 만지면 지금과 동일하다.
+
+#### 파일 경로: `src/views/WeatherMapView.vue`
+```js
+const TINT_STOPS = [
+  { hour: 0, color: [30, 42, 70, 0.42] },
+  { hour: 7, color: [214, 150, 80, 0.22] },
+  { hour: 9, color: [214, 150, 80, 0] },
+  { hour: 17, color: [214, 150, 80, 0] },
+  { hour: 19, color: [224, 126, 60, 0.26] },
+  { hour: 21, color: [30, 42, 70, 0.42] },
+]
+const timeTint = computed(() => /* hour 구간 사이 rgba 선형 보간 */)
+```
+```html
+<div class="weather-map__tint" :style="{ backgroundColor: timeTint }" />
+```
+```css
+.weather-map__tint { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+```
+
+9. 도시 도트 테두리를 육지와 동일한 값으로 고정하고, `buildGrid()`에서 도시 주변 반경 2칸에 조건색 후광을 정적으로 계산해 붙였다 — 매 프레임이 아니라 그리드를 다시 지을 때만 한 번 계산되므로 런타임 비용이 없다.
+
+#### 파일 경로: `src/components/practices/weather/KoreaMapDots.vue`
+```js
+const LAND_BORDER_COLOR = '#d1cabb'
+function markerBorderColor() { return LAND_BORDER_COLOR }
+
+for (const [key, city] of cityByKey) {
+  const [cityCol, cityRow] = key.split(',').map(Number)
+  const color = CONDITION_ACCENT_COLORS[city.condition] ?? CONDITION_ACCENT_COLORS.sun
+  // 반경 2칸 이내 육지 칸에 distance 기반 감쇠로 halo = { color, strength } 부여
+}
+```
+```css
+.korea-map__dot.is-land {
+  background-color: color-mix(in srgb, #fff2b8 calc(var(--radar, 0) * 45%),
+    color-mix(in srgb, var(--burst-color, var(--dot-lit)) calc(var(--burst, 0) * 100%),
+      color-mix(in srgb, var(--dot-lit) calc(var(--intensity, 0) * 100%),
+        color-mix(in srgb, var(--halo-color, var(--dot-lit)) calc(var(--halo, 0) * 100%), var(--dot-lit))
+      )
+    )
+  );
+}
+```
+
+**트러블슈팅**
+- 문제: 레이더를 끄거나 지도가 리사이즈되면 스윕이 지나간 칸이 밝은 채로 영구히 남았다(사용자가 스크린샷으로 제보).
+- 원인: 위 사고 과정에 적었듯, `buildGrid()`가 애니메이션 버퍼를 새로 만들면서 이미 DOM에 남은 인라인 스타일은 지우지 않아 "고아 스타일"이 됐다.
+- 해결: `clearDotOverlayStyles()`를 버퍼 교체 직전에 호출하고, 레이더 토글을 끌 때도 감쇠를 기다리지 않고 즉시 지우도록 했다.
+
+**결과**
+- `npx vite build` 통과.
+- Chrome 확장으로 확인: 레이더 체크박스가 처음엔 꺼져 있고, 켜서 한 바퀴 돌린 뒤 끄면 잔광이 즉시 사라짐(스크린샷으로 전/후 비교). 바다 클릭 시 눌림 후 물결이 뒤따르는 것 확인. 시간대 슬라이더를 00:00으로 끌면 바다와 육지가 함께 짙은 남색으로 덮이고(배경색이 아니라 레이어임을 시각적으로 확인), "현재 시각으로" 버튼으로 즉시 복원. 정보창에 도시 2곳을 즐겨찾기로 추가해 기온/습도/풍속 값이 열을 벗어나지 않는 것 확인. 날씨 탭 진입 시 정렬이 권역순(서울→수원→인천→춘천→대전→세종→...)으로 시작하는 것 확인. 콘솔 에러 없음.
+
+**느낀점**
+- 지난 라운드에 "기능을 추가하는 것"과 이번 라운드에 "실사용해보고 덜어내는 것"은 완전히 다른 종류의 판단이라는 걸 느꼈다. 처음부터 다 넣지 않고 일단 만들어본 뒤 피드백으로 걷어내는 것도 정상적인 개발 사이클이라는 걸 체감했다.
+- `:key`가 있는 v-for에서 DOM 노드가 재사용된다는 사실은 알고 있었지만, "애니메이션 버퍼를 갈아치우는 코드"와 "그 버퍼 값을 참조해 DOM을 지우는 코드"가 실은 암묵적으로 짝을 이루고 있었고, 한쪽만 리셋하면 다른 쪽이 고아가 된다는 걸 이번 버그로 명확히 배웠다. 앞으로 "정리(cleanup) 책임이 있는 상태"를 리셋할 때는 그 상태를 참조하는 다른 로직이 있는지 먼저 확인해야겠다.
+
+---
+
+## 34. 모바일 실기기 피드백 4건 반영 (하단 탭바 안전영역·게임 줌 폭 초과·마커 테두리 복원·말풍선 꼬리 클리핑)
+
+**요구사항**
+1. 모바일에서 하단 "정보/게임" 탭바가 Safari 자체 하단 바에 가려 잘려 보이는 문제 개선.
+2. 모바일에서 "한반도 지역 찾기" 게임 시작 시 지도가 과하게 확대돼 게임이 사실상 불가능한 문제 개선.
+3. 날씨 지역(도시 마커) 테두리를 테두리 안의 색(조건색) 계열로 어색하지 않게 변경.
+4. 지도 가장자리에서 말풍선 꼬리가 잘려 보이는 문제 수정.
+
+**사고 과정**
+- 사용자가 실제 배포된 사이트를 아이폰 Safari로 확인하며 보낸 스크린샷 4장 기반 피드백이라, 코드만 봐서는 안 보이는 종류의 문제였다 — 특히 1번(하단 탭바 클리핑)은 데스크톱 브라우저에서는 재현 자체가 안 되는 iOS Safari 고유의 "상시 하단 바(홈 인디케이터 영역)" 이슈였다.
+- 1번은 원인을 찾아보니 프로젝트 전체에 `env(safe-area-inset-*)`나 `viewport-fit=cover`가 한 번도 쓰인 적이 없었다. `--nav-h`(App.vue가 ResizeObserver로 재서 CSS 변수로 흘려보내는 기존 패턴)와 같은 방식으로, 탭바 높이에 안전 영역만큼을 더한 `--tab-bar-h` 변수 하나를 만들어 탭바·시트 위치·지도 여백 세 곳에서 공유하기로 했다. 전역 `box-sizing: border-box` 때문에 단순히 `padding-bottom`만 추가하면 버튼 터치 영역이 오히려 줄어드는 함정이 있어, `height`도 함께 늘려야 한다는 걸 계산해보고 알아챘다.
+- 2번은 `zoomToKorea()`가 `rows.value / (GRID_H / 2)`로 세로 기준으로만 배율을 정하는 게 원인이었다 — 이 배율이 가로에도 그대로 곱해지는데, 가로 칸 수(`cols.value`)는 전혀 고려하지 않았다. 세로로 긴 모바일 화면일수록 세로 기준 배율이 커지고, 그 배율이 상대적으로 좁은 가로 폭에 곱해지면서 한반도가 화면 밖으로 넘쳐버렸다. 새로운 모바일 감지 로직(matchMedia 등)을 추가하는 대신, 이미 컨테이너 실측 크기로 계산되는 `cols.value`/`rows.value`만으로 "한반도 폭이 화면 가로를 넘지 않는 상한"을 구해 더 작은 쪽을 쓰는 것으로 최소 변경했다 — 데스크톱처럼 가로가 넉넉하면 이 상한이 항상 크므로 기존 동작과 동일하다.
+- 3번은 지난 라운드(33번 항목)에서 "도시가 지형 위에 붙은 스티커처럼 보인다"는 문제를 풀려고 마커 테두리를 육지색 고정값으로 바꿨는데, 실제로 보니 오히려 어색했다는 피드백이었다. 정확히 그 이전 구현(커밋 `a2d5161` 이전, `darken(markerColor(condition))`)으로 되돌리면 되는 문제라 git 이력에서 예전 코드를 그대로 복원했다.
+- 4번은 `.korea-map`의 `overflow: hidden`과, 말풍선 위치 계산(`handleDotHover`)에 클램프가 전혀 없다는 조합이 원인이었다. 독도처럼 그리드 우측 끝에 있는 지명은 말풍선이 `translate(-50%, ...)`로 중앙 정렬되며 절반이 컨테이너 밖으로 나가 잘렸다. `WeatherMapView.vue`의 `positionPopupAt()`이 이미 같은 클래스의 문제(화면 밖으로 나가는 팝업)를 실측 후 clamp하는 방식으로 풀고 있었지만, 이 말풍선은 텍스트가 짧고 고정적(도시/지명 이름 최대 3글자 + 조건 라벨 최대 2글자)이라 nextTick 실측 없이 안전한 최대 폭을 상수로 가정해 분석적으로 clamp하는 쪽이 더 단순하다고 판단했다. 다만 박스만 안쪽으로 당기면 꼬리가 더 이상 실제 도트를 가리키지 않게 되므로, 클램프로 어긋난 만큼을 `--tail-offset` CSS 변수로 꼬리에 반영해 보정했다.
+
+**해결 과정**
+1. `index.html`의 viewport meta에 `viewport-fit=cover`를 추가하고, `WeatherMapView.vue`에 `--tab-bar-h` 변수를 도입해 탭바 높이·시트 위치·지도 여백에서 공유했다.
+
+#### 파일 경로: `index.html`
+```html
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+```
+
+#### 파일 경로: `src/views/WeatherMapView.vue`
+```css
+@media (max-width: 1000px) {
+  .weather-map {
+    --tab-bar-h: calc(56px + env(safe-area-inset-bottom, 0px));
+  }
+  .map-window--info,
+  .map-window--game { bottom: var(--tab-bar-h); }
+  .weather-map__body { padding-bottom: var(--tab-bar-h); }
+  .mobile-sheet-tabs {
+    height: var(--tab-bar-h, 56px); /* border-box라 height 자체를 늘려야 버튼 56px가 유지된다 */
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+}
+```
+
+2. `zoomToKorea()`에 가로 폭 상한을 추가했다.
+
+#### 파일 경로: `src/components/practices/weather/KoreaMapDots.vue`
+```js
+function zoomToKorea() {
+  const heightScale = rows.value / (GRID_H / 2)
+  const widthScale = cols.value / GRID_W // 한반도 폭이 화면을 넘지 않는 상한
+  targetScale = clamp(Math.min(heightScale, widthScale), MIN_SCALE, MAX_SCALE)
+  ...
+}
+```
+
+3. 마커 테두리 색을 조건색 기반으로 복원했다.
+
+```js
+function darken(hex, amount = 0.15) {
+  const num = parseInt(hex.slice(1), 16)
+  const r = Math.round(((num >> 16) & 255) * (1 - amount))
+  const g = Math.round(((num >> 8) & 255) * (1 - amount))
+  const b = Math.round((num & 255) * (1 - amount))
+  return `rgb(${r}, ${g}, ${b})`
+}
+function markerBorderColor(city) {
+  return darken(markerColor(city.condition))
+}
+```
+
+4. 말풍선 위치를 컨테이너 폭 기준으로 clamp하고, 꼬리 오프셋을 함께 계산했다.
+
+```js
+const BUBBLE_HALF_WIDTH = 80
+const BUBBLE_EDGE_PAD = 6
+const BUBBLE_TAIL_MARGIN = 12
+
+function handleDotHover(dot, event) {
+  const desiredLeft = dotRect.left - rootRect.left + dotRect.width / 2
+  const clampedLeft = clamp(desiredLeft, BUBBLE_HALF_WIDTH + BUBBLE_EDGE_PAD,
+    rootRect.width - BUBBLE_HALF_WIDTH - BUBBLE_EDGE_PAD)
+  const tailOffset = clamp(desiredLeft - clampedLeft,
+    -(BUBBLE_HALF_WIDTH - BUBBLE_TAIL_MARGIN), BUBBLE_HALF_WIDTH - BUBBLE_TAIL_MARGIN)
+  tooltipPos.value = { left: clampedLeft, top: dotRect.top - rootRect.top, tailOffset }
+}
+```
+```css
+.korea-map__bubble::before, .korea-map__bubble::after {
+  left: calc(50% + var(--tail-offset, 0px));
+}
+```
+
+**트러블슈팅**
+- 문제: 이 환경(Claude in Chrome 확장, 원격 브라우저)의 `resize_window` 도구로 브라우저 창을 390×844(모바일 크기)로 줄이려 했으나 `window.innerWidth`가 계속 1920으로 나와 실제 리사이즈가 반영되지 않았다.
+- 원인: 원격/가상 디스플레이 환경이라 창 리사이즈 요청이 실제 렌더링 뷰포트에 반영되지 않는 것으로 보인다(로컬 환경 제약).
+- 해결: 모바일 전용 동작(안전 영역, 좁은 화면 줌 상한)은 이 도구로 직접 재현 검증하지 못했다 — 대신 코드 리뷰로 로직을 검증하고, 데스크톱(넓은 뷰포트)에서 회귀가 없는지(줌 배율·마커 테두리·말풍선 정상 동작)를 확인해 안전망으로 삼았다. 사용자에게는 실기기 재확인을 요청해야 한다.
+
+**결과**
+- `npx vite build` 통과.
+- Chrome 확장(데스크톱 뷰포트)으로 확인: 도시 마커 테두리가 조건색 계열의 어두운 톤으로 보임(예: 맑음 도시 = 주황 계열 테두리). 게임 시작 시 데스크톱 폭에서는 기존과 동일하게 확대되어 회귀 없음. 독도 말풍선이 꼬리 포함 정상적으로 보임(다만 이 위치가 실제 컨테이너 가장자리에 딱 붙는 좁은 화면은 재현하지 못해, clamp 로직 자체는 코드 리뷰로 검증). 콘솔 에러 없음.
+- 모바일 전용 항목(안전 영역 여백, 좁은 화면 줌 상한, 가장자리 clamp 실제 동작)은 도구 제약으로 실기기 검증을 사용자에게 요청.
+
+**느낀점**
+- 이번 4건은 전부 "데스크톱 개발 환경에서는 안 보이던 문제"였다 — 실제 사용자가 실기기로 써보고 스크린샷을 보내주지 않았다면 발견하기 어려웠을 버그들이다. 반응형 CSS를 만들 때 `@media` 쿼리로 레이아웃을 바꾸는 것과, `env(safe-area-inset-*)`처럼 브라우저/OS 크롬을 피하는 것은 완전히 다른 종류의 고려사항이라는 걸 체감했다.
+- 자동화 도구로 모바일 뷰포트를 재현하지 못하는 상황에서도, "코드 로직이 데스크톱에서 기존과 동일하게 동작하는가"를 회귀 테스트 삼아 최소한의 안전망은 확보할 수 있었다. 다만 이런 한계는 솔직하게 사용자에게 알리고 실기기 확인을 요청하는 게 맞다고 판단했다.
+
+---
+
+## 35. 지도 버그 재수정(말풍선 꼬리·줌 렉·표 헤더) + 정보창 제목 + 최종 제출 준비(README·체크리스트·보안)
+
+**요구사항**
+1. 말풍선 꼬리가 여전히 안 보임(34번에서 edge-clamp만 고쳤는데 실제로는 항상 안 보이는 문제였음) — 재조사 후 수정.
+2. 지도 줌 시 렉이 심함, 특히 게임 시작 직후 — 원인 조사 및 개선.
+3. 즐겨찾기 표 헤더(습도/풍속)가 아예 표시되지 않음 — 개선.
+4. 지도 정보창 제목("즐겨찾기 · 오늘의 순위")이 지도 효과 섹션까지 포함하게 되면서 부적절해짐 — 재검토.
+5. 강의 마지막 날: 최종 저장소·배포 링크, README(기능/실행법/트러블슈팅/셀프 코드리뷰), 스크린샷, 체크리스트 자가점검 정리.
+6. Public 공개 전 보안 검토.
+
+**사고 과정**
+- 1·2·3번은 34번에서 이미 "고쳤다"고 보고했던 것들인데 사용자가 재현해보니 그대로였다 — 가정("가장자리에서만 잘린다", "표 폭 문제")이 틀렸다는 뜻이므로, 이번엔 추측 대신 Explore 서브에이전트로 실제 CSS 계산 결과(폴리곤 좌표, 컬럼 폭 대비 글리프 폭)를 코드 레벨에서 먼저 확인한 뒤에 고쳤다.
+- 말풍선 꼬리: `clip-path`가 걸린 엘리먼트는 자기 자신의 가상 요소(`::before`/`::after`)까지 포함한 서브트리 전체가 클리핑 대상이 된다는 CSS Masking 스펙을 몰랐다 — 꼬리가 박스 바깥(`bottom: -9px`)에 그려지는 한, 그 박스에 `clip-path`가 걸려 있으면 예외 없이 100% 잘린다. "위치 계산이 잘못됐다"가 아니라 "애초에 같은 엘리먼트에 두 가지 상반된 요구(모서리는 깎이고 꼬리는 밖으로 나가야 함)를 걸었다"는 구조적 문제였다.
+- 줌 렉: `transform` 스타일을 쓴 직후 같은 함수에서 `getBoundingClientRect()`를 매번 다시 호출하는 "쓰기 후 읽기" 패턴이 강제 동기 리플로우를 유발한다는 걸 처음엔 몰랐는데, `applyTransform()`이 rAF 루프 안에서 프레임마다(파동 이펙트가 전혀 없을 때도!) 무조건 호출되고 있다는 걸 코드 추적으로 확인했다. 포인터 핸들러들은 이미 "캐시 없을 때만 refresh"하는 지연 계산 패턴을 갖고 있었으니, 그 패턴을 훼손하는 무조건 호출만 없애면 되는 문제였다.
+- 표 헤더: 실제로 폭 계산을 해보니(모노스페이스 폰트에서 한글 글리프는 영문의 약 2배 폭) "습도(%)"에 필요한 폭이 가용 폭의 1.2배, "풍속(m/s)"은 1.5배가 넘어 ellipsis가 단위 표시를 통째로 삼켜버렸다. 컬럼을 넓히면 220px 창 레이아웃이 깨지므로, 헤더는 짧게 되돌리고 단위는 표 아래 캡션으로 뺐다 — 이미 `WeatherHomeView.vue`에 있던 "요약줄 아래 작은 안내문" 패턴을 그대로 재사용했다.
+- 마지막 날이라 사용자가 교수님 최종 공지(제출 체크리스트)를 그대로 붙여넣고 검토를 요청했다 — `docs/checklist.md`가 이미 이 강의의 최우선 기준 문서로 정해져 있어서, 그 문서와 실제 코드를 하나씩 대조하는 방식으로 확인했다. 그 과정에서 저장소가 이미 GitHub Actions로 자동 배포되고 있고, 필요한 항목이 전부 구현돼 있다는 걸 재확인했다 — 다만 체크리스트 파일 자체의 체크박스가 하나도 안 눌려있어 "완료"라는 요약 표와 모순되는 걸 발견해 정리했다.
+- 보안 검토에서는 예상했던 "API 키 하드코딩" 같은 문제는 없었지만, 대신 예상 못 했던 두 가지를 발견했다: (1) 강사님 강의자료 PDF(~19MB)가 이미 public 저장소에 커밋·푸시돼 있었다 — 자격증명 문제는 아니지만 저작권 문제라 별도로 짚어야 했다. (2) `.claude/` 안의 스크린샷 파일이 `.gitignore`에 안 걸려 있어 `git add -A` 한 번이면 실수로 커밋될 뻔한 상태였다.
+
+**해결 과정**
+1. 말풍선 꼬리 — 시각적 "몸통"(clip-path 포함)을 안쪽 `-body` 래퍼로 분리하고, 꼬리는 클리핑 없는 바깥 엘리먼트에 남겼다.
+
+#### 파일 경로: `src/components/practices/weather/KoreaMapDots.vue`
+```html
+<div class="korea-map__bubble" :style="{ left, top, '--tail-offset': ... }">
+  <div class="korea-map__bubble-body">{{ ... }}</div>
+</div>
+```
+```css
+.korea-map__bubble { position: absolute; width: max-content; pointer-events: none; }
+.korea-map__bubble-body { clip-path: polygon(...); background: var(--paper); ... }
+/* ::before/::after(꼬리)는 .korea-map__bubble에 그대로 — 이제 clip-path 영향 밖 */
+```
+
+2. 줌 렉 — `applyTransform()`의 무조건 `refreshRects()` 호출을 제거하고 캐시 무효화로 바꿨다.
+
+```js
+function applyTransform() {
+  if (!viewportRef.value) return
+  viewportRef.value.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`
+  cachedRootRect = null
+  cachedGridRect = null   // 실제로 필요할 때(포인터 인터랙션)만 지연 계산
+}
+```
+
+3. 즐겨찾기 표 헤더 — 짧은 헤더 + 표 아래 단위 캡션.
+
+#### 파일 경로: `src/views/WeatherMapView.vue`
+```html
+<div class="fav-compare__row fav-compare__row--head">
+  <span>도시</span><span>기온</span><span>습도</span><span>풍속</span>
+</div>
+...
+<p class="fav-compare__unit-note">단위: 습도 %, 풍속 m/s</p>
+```
+
+4. 정보창 제목 — "즐겨찾기 · 오늘의 순위" → "지도 컨트롤".
+
+5. `docs/checklist.md`의 체크박스를 실제 완료 상태로 갱신하고, `WeatherParent.vue`/Element Plus 적용 범위처럼 문서와 실제 구현이 어긋난 지점을 각주로 명시.
+
+6. 루트 `README.md`에 화면 스크린샷 2장(날씨 목록·지도), 체크리스트 대비 구현 메모, 4일간 트러블슈팅 요약, 4관점 셀프 코드 리뷰를 추가했다. `skala-vue/README.md`에도 스크린샷 1장과 루트 README로의 안내를 추가.
+
+7. 보안 정리 — PDF 추적 해제, `.gitignore` 보강.
+
+#### 파일 경로: `.gitignore`
+```
+.env*
+!.env.example
+.claude/
+pdf/*.pdf
+```
+```bash
+git rm --cached pdf/*.pdf   # 로컬 파일은 유지, 앞으로의 커밋에서만 제외
+```
+
+**트러블슈팅**
+- 문제: 34번에서 말풍선 꼬리를 "가장자리에서만 잘린다"고 잘못 진단해 clamp 로직만 추가했는데 실제로는 전혀 효과가 없었다.
+- 원인: 진짜 원인(`clip-path`가 가상 요소까지 클리핑)을 확인하지 않고 이전 결함 있던 가정(overflow: hidden 탓)을 그대로 이어받았다.
+- 해결: 이번엔 Explore 서브에이전트로 실제 CSS 값과 스펙 동작을 먼저 확인한 뒤 수정해, 재발을 방지했다.
+
+**결과**
+- `npx vite build` 통과.
+- Chrome 확장으로 확인: 춘천 도시 호버 시 말풍선 꼬리가 삼각형으로 온전히 렌더링됨(스크린샷 확대로 확인). 즐겨찾기 표에 "습도"/"풍속" 헤더와 "단위: 습도 %, 풍속 m/s" 캡션이 잘리지 않고 표시됨. 정보창 제목이 "지도 컨트롤"로 변경됨. 게임 시작 시 줌 애니메이션이 정상 동작(코드 레벨에서 강제 리플로우 원인 제거 확인).
+- `git check-ignore`로 `.claude/`·`.env*` 패턴이 의도대로 걸리는지, `.env.example`은 예외로 남는지 확인. PDF 3개 파일 추적 해제 확인.
+- `docs/checklist.md` 체크박스 갱신, 루트 `README.md`에 스크린샷·트러블슈팅 요약·셀프 코드리뷰 반영.
+
+**느낀점**
+- 같은 버그를 "고쳤다"고 두 번 보고했다가 두 번째에도 재현되는 걸 보고, 가정을 검증하지 않고 넘어가면 결국 사용자가 다시 발견해서 재작업하게 된다는 걸 절감했다. 특히 CSS는 스펙 동작(이번엔 clip-path의 서브트리 클리핑 범위)을 정확히 모르면 겉보기 증상만 보고 잘못된 진단을 내리기 쉽다는 것도 배웠다.
+- 강의 마지막 날 제출 준비를 하면서, "요구사항이 다 구현돼 있다"와 "그게 채점자에게 명확히 보인다"는 별개라는 걸 느꼈다 — 파일명이 문서와 다르거나 특정 요구사항이 예상과 다른 곳에 구현돼 있으면, 실제로는 다 됐어도 README에서 그 대응관계를 짚어주지 않으면 누락처럼 보일 수 있다.
+- 보안 검토를 "API 키가 새어나갔는가"로만 좁혀 생각했다가, 저작권이 있는 강의자료가 이미 public 저장소에 올라가 있다는 훨씬 실질적인 문제를 발견했다 — 보안 검토는 "자격증명"보다 넓은 "이게 공개돼도 괜찮은가" 관점으로 봐야 한다는 걸 다시 확인했다.

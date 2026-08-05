@@ -12,43 +12,44 @@
 
 ## 🔧 사전 준비 (1일차에 먼저 해둘 것 — 나중에 몰아서 하면 시간 소모)
 
-- [ ] 본인 GitHub 계정에 Public 저장소 생성 (예: `skala-vue`)
-- [ ] 시크릿 창(⌘+Shift+N)으로 열어 로그인 없이 소스가 보이는지 확인
-- [ ] OpenWeatherMap 가입 → API Key 발급 (3일차에 사용, 승인에 시간이 걸릴 수 있음 — 미리 해둘 것)
+- [x] 본인 GitHub 계정에 Public 저장소 생성 (예: `skala-vue`)
+- [x] 시크릿 창(⌘+Shift+N)으로 열어 로그인 없이 소스가 보이는지 확인
+- [x] OpenWeatherMap 가입 → API Key 발급 (3일차에 사용, 승인에 시간이 걸릴 수 있음 — 미리 해둘 것)
 
 ## 📅 1일차 (7/31) — 1단계 「날씨 Mockup」
 
-- [ ] `v-for`로 `weatherList`(id·name·temp·status) 렌더링 — `:key`에 `id` 바인딩
-- [ ] `v-if` 조건부 — 25도 이상 '🔥 더움' / 25도 미만 '❄ 선선함'
-- [ ] `:value`·`@input` 양방향 바인딩 — 한글(IME) 입력이 깨지지 않는지 확인
-- [ ] 오늘 작업분 커밋 & 푸시
+- [x] `v-for`로 `weatherList`(id·name·temp·status) 렌더링 — `:key`에 `id` 바인딩
+- [x] `v-if` 조건부 — 25도 이상 '🔥 더움' / 25도 미만 '❄ 선선함'
+- [x] `:value`·`@input` 양방향 바인딩 — 한글(IME) 입력이 깨지지 않는지 확인
+- [x] 오늘 작업분 커밋 & 푸시
 
 ## 📅 2일차 (8/3) — 2단계 「컴포지션」 + 3단계 「컴포넌트 분리」
 
-- [ ] 반응형 상태 3종 — `searchQuery` · `selectedCityInfo` · `weatherList`
-- [ ] `computed`로 `filteredWeatherList` — 검색어가 도시 이름에 포함된 것만
-- [ ] `watch(selectedCityInfo)` · `watchEffect(searchQuery)` 각각 콘솔 로그
-- [ ] 검색어가 비면 원본 출력 / 일치하면 결과 출력
-- [ ] 기능은 그대로 두고 4개 파일로 분리: `WeatherParent.vue` · `BaseDashboardCard.vue`(+slot) · `SearchBar.vue` · `WeatherCard.vue`
-- [ ] `SearchBar`는 props 수신 + `update-query` emit / `WeatherCard`는 `select-card`·`click-detail` emit
-- [ ] 오늘 작업분 커밋 & 푸시
+- [x] 반응형 상태 3종 — `searchQuery`(현재는 `searchStore.query`로 Pinia 이관) · `selectedCityInfo` · `weatherList`
+- [x] `computed`로 `filteredWeatherList` — 검색어가 도시 이름에 포함된 것만
+- [x] `watch(selectedCityInfo)` · `watchEffect(searchQuery)` 각각 콘솔 로그
+- [x] 검색어가 비면 원본 출력 / 일치하면 결과 출력
+- [x] 기능은 그대로 두고 4개 파일로 분리: `WeatherParent.vue`(역할은 `WeatherHomeView.vue`가 담당) · `BaseDashboardCard.vue`(+slot) · `SearchBar.vue` · `WeatherCard.vue`
+- [x] `SearchBar`는 props 수신 + `update-query` emit / `WeatherCard`는 `select-card`·`click-detail` emit
+- [x] 오늘 작업분 커밋 & 푸시
 
 ## 📅 3일차 (8/4) — 4단계 「Router · Pinia · Axios」
 
-- [ ] Router — 목록↔상세 라우팅, 지연 로딩, Catch-all Route
-- [ ] Pinia `configStore` — `state.unit` / `getters.unitSymbol`(℃·℉) / `actions.toggleUnit`
-- [ ] `UnitToggler.vue`를 Navigation Bar 옆에 배치, 메인·상세 양쪽 적용
-- [ ] 온도 변환은 `computed`로 — `Math.round((rawTemp * 9) / 5 + 32)`
-- [ ] Axios로 OpenWeatherMap 실제 데이터로 교체 + 로딩·에러 처리
-- [ ] 오늘 작업분 커밋 & 푸시
+- [x] Router — 목록↔상세 라우팅, 지연 로딩, Catch-all Route
+- [x] Pinia `configStore` — `state.unit` / `getters.unitSymbol`(℃·℉) / `actions.toggleUnit`
+- [x] `UnitToggler.vue`를 Navigation Bar 옆에 배치, 메인·상세 양쪽 적용
+- [x] 온도 변환은 `computed`로 — `Math.round((rawTemp * 9) / 5 + 32)`
+- [x] Axios로 OpenWeatherMap 실제 데이터로 교체 + 로딩·에러 처리
+- [x] 오늘 작업분 커밋 & 푸시
 
 ## 📅 4일차 (8/5) — 마무리 + 제출
 
-- [ ] Element Plus로 UI 정리
-- [ ] Modern JS — 구조분해·전개·옵셔널 체이닝 적용
-- [ ] `npm run build` · base 경로 확인 · 정적 배포(Vercel·Netlify·GitHub Pages)
-- [ ] 저장소가 Public인지 시크릿 창으로 최종 확인
-- [ ] 수업 종료 전까지 제출 (별도 안내)
+- [x] Element Plus로 UI 정리(상세 페이지 `ElSkeleton` 로딩 상태 등 — 서비스 화면은 커스텀
+      레트로 테마 유지, 나머지 Element Plus 예제는 `practices/elementplus/`에 별도 실습)
+- [x] Modern JS — 구조분해·전개·옵셔널 체이닝 적용
+- [x] `npm run build` · base 경로 확인 · 정적 배포(GitHub Pages)
+- [x] 저장소가 Public인지 시크릿 창으로 최종 확인
+- [x] 수업 종료 전까지 제출 (별도 안내)
 
 ## 진행 현황 요약
 

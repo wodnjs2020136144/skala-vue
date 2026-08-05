@@ -1,8 +1,12 @@
 # skala-vue
 
-Vue.js 강의 종합과제 — 픽셀/레트로 LED 전광판 컨셉의 날씨 대시보드입니다. 저장소 전체 소개는 [상위 폴더의 README](../README.md)를 참고하세요.
+Vue.js 강의 종합과제 — 픽셀/레트로 LED 전광판 컨셉의 날씨 대시보드입니다. 저장소 전체
+소개, 4일간 트러블슈팅 요약, 셀프 코드 리뷰는 [상위 폴더의 README](../README.md)를
+참고하세요.
 
 🔗 **배포 페이지**: https://wodnjs2020136144.github.io/skala-vue/
+
+![날씨 목록 화면](./docs/reports/images/final/01-home-weather-list.jpg)
 
 ## 로컬 실행
 
